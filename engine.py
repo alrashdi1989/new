@@ -66,6 +66,8 @@ class Job:
         self.status_path, self.log_path, self.cancel_path = paths(spec["status_dir"])
         self.count = 0
         self.new_files = []
+        self.total = 0
+        self.posts = set()
         self.state = {"state": "running", "count": 0, "site": spec["site"],
                       "user": spec["user"], "out": spec["out"],
                       "started": time.time(), "beat": time.time(),
@@ -91,9 +93,28 @@ class Job:
         return os.path.exists(self.cancel_path)
 
     # ---- gallery-dl output ----
+    def progress_text(self):
+        seen = len(self.posts)
+        if self.total and seen <= self.total:
+            return f"{self.count} new · post {seen} of ~{self.total} · ≈{self.total - seen} left"
+        if seen:
+            return f"{self.count} new · {seen} posts checked"
+        return f"{self.count} files downloaded…"
+
     def on_line(self, line):
         if self.cancelled():
             raise SystemExit("cancelled")
+        if line.startswith("@@META "):
+            total, _, post_id = line[7:].partition("|")
+            try:
+                self.total = max(self.total, int(total))
+            except ValueError:
+                pass
+            if post_id and post_id not in self.posts:
+                self.posts.add(post_id)
+                if len(self.posts) % 5 == 0 or len(self.posts) == 1:
+                    self.save(total=self.total, seen=len(self.posts), status=self.progress_text())
+            return
         if line.startswith("#"):
             self.log("skip " + os.path.basename(line[1:].strip()))
         elif not line.startswith("[") and os.sep in line:
@@ -102,10 +123,11 @@ class Job:
             if len(self.new_files) >= 25:
                 self.flush_scan()
             self.log("+ " + os.path.basename(line))
-            self.save(count=self.count, status=f"{self.count} files downloaded…")
+            self.save(count=self.count, total=self.total, seen=len(self.posts),
+                      status=self.progress_text())
             if time.time() - self._last_notify > 2:
                 self._last_notify = time.time()
-                self.notify(f"@{self.spec['user']}: {self.count} files downloaded")
+                self.notify(f"@{self.spec['user']}: {self.progress_text()}")
         else:
             self.log(line)
             low = line.lower()
@@ -174,6 +196,7 @@ class Job:
         text = {"done": "Finished.", "cancelled": "Stopped.",
                 "error": f"Finished with errors (code {rc})."}[result]
         self.log(f"Saved in: {self.spec.get('out_label', self.spec['out'])}")
-        self.save(state=result, count=self.count, status=f"{text} {self.count} new files")
+        self.save(state=result, count=self.count, total=self.total, seen=len(self.posts),
+                  status=f"{text} {self.count} new files")
         self.notify(f"{text} {self.count} new files from @{self.spec['user']}", done=True)
         return result

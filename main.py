@@ -19,7 +19,7 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.storage.jsonstore import JsonStore
 from kivy.lang import Builder
-from kivy.properties import BooleanProperty, ListProperty
+from kivy.properties import BooleanProperty, ListProperty, NumericProperty
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
@@ -98,6 +98,12 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, tiktok_
         args += ["-o", "audio=false", "-o", "covers=false"]
         if tiktok_cookies:  # the TikTok login is only ever sent to TikTok
             args += ["-o", "cookies=" + json.dumps(tiktok_cookies)]
+    # Report each post's id plus the profile's post count, so the app can show
+    # "post N of ~total" (only meaningful for whole profiles).
+    if site == "x" and url.endswith("/media"):
+        args += ["--print", "@@META {user[media_count]}|{tweet_id}"]
+    elif site == "tiktok" and url.endswith("/posts"):
+        args += ["--print", "@@META {authorStats[videoCount]}|{id}"]
     args.append(url)
     return args
 
@@ -695,6 +701,23 @@ KV = """
                     text_size: self.size
                     shorten: True
                     shorten_from: "right"
+            Widget:
+                size_hint_y: None
+                height: dp(6) if root.progress >= 0 else 0
+                opacity: 1 if root.progress >= 0 else 0
+                canvas:
+                    Color:
+                        rgba: 1, 1, 1, .12
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(3)]
+                    Color:
+                        rgba: .40, .85, 1, 1
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.width * max(0, min(1, root.progress)), self.height
+                        radius: [dp(3)]
             ScrollView:
                 id: scroll
                 bar_color: 1, 1, 1, .3
@@ -745,6 +768,7 @@ IDLE, BUSY, OK, ERR = (1, 1, 1, .4), (.40, .85, 1, 1), (.30, .86, .64, 1), (.98,
 class Root(FloatLayout):
     status_color = ListProperty(IDLE)
     busy = BooleanProperty(False)
+    progress = NumericProperty(-1)
 
     def __init__(self, store, **kw):
         super().__init__(**kw)
@@ -948,6 +972,7 @@ class Root(FloatLayout):
 
         self.log.text = ""
         self._log_pos = 0
+        self.progress = -1
         self.busy = True
         self.set_status(f"Downloading {'TikTok' if site == 'tiktok' else 'X'} @{user}…")
         self.set_state(BUSY)
@@ -994,12 +1019,16 @@ class Root(FloatLayout):
         if not st:
             return
         self.status.text = st.get("status", "")
+        total, seen = st.get("total") or 0, st.get("seen") or 0
+        self.progress = min(seen / total, 1) if total else -1
         state = st.get("state")
         stale = state == "running" and time.time() - st.get("beat", 0) > 45
         if state != "running" or stale:
             if stale:
                 self.status.text = "Download stopped unexpectedly. Tap Download to continue."
             self.status_color = OK if state == "done" else (IDLE if state == "cancelled" else ERR)
+            if state == "done" and self.progress >= 0:
+                self.progress = 1
             self.busy = False
             if self._job_poll is not None:
                 self._job_poll.cancel()
