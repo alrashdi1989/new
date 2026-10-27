@@ -35,8 +35,18 @@ jobs:
             .buildozer
           key: buildozer-${{ hashFiles('buildozer.spec') }}
 
+      - name: Use the app's permanent signing key (so updates install over the old version)
+        run: |
+          mkdir -p ~/.android
+          cp debug.keystore ~/.android/debug.keystore
+
       - name: Build debug APK
         run: yes | buildozer -v android debug
+
+      - name: Show signing certificate
+        run: |
+          SIGNER=$(find ~/.buildozer -name apksigner -type f | head -1)
+          "$SIGNER" verify --print-certs bin/*.apk | grep -i "SHA-256"
 
       - uses: actions/upload-artifact@v4
         with:
