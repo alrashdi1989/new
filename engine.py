@@ -41,7 +41,7 @@ def request_cancel(status_dir):
         pass
 
 
-SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat"}
+SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram"}
 
 
 def friendly_error(rc, site, detail=""):

@@ -2,8 +2,8 @@
 Snapchat add-on for the download engine.
 
 gallery-dl's own Snapchat profile support skips the current (24-hour) story.
-This extractor reads a public profile once and yields both the current story
-and all saved highlights. Internal URL form:  snapfull:<username>
+This extractor reads a public profile once and yields the current story,
+all saved highlights, and the Spotlight videos listed on the profile. Internal URL form:  snapfull:<username>
 """
 
 from gallery_dl import extractor
@@ -28,10 +28,15 @@ class SnapchatFullExtractor(SnapchatExtractor):
         for highlight in page.get("curatedHighlights") or ():
             if highlight.get("snapList"):
                 sections.append(("Highlights", highlight))
+        # Only the creator's own Spotlights listed on the profile page.
+        # (A Spotlight page's feed is mostly other people's videos, so it's not used.)
+        for spot in page.get("spotlightHighlights") or ():
+            if spot.get("snapList"):
+                sections.append(("Spotlight", spot))
 
         total = sum(len(group["snapList"]) for _, group in sections)
         if not total:
-            self.log.info("@%s has no public story or highlights right now", user)
+            self.log.info("@%s has no public story, highlights or Spotlight right now", user)
             yield Message.Directory, "", page
 
         current = None
@@ -42,7 +47,10 @@ class SnapchatFullExtractor(SnapchatExtractor):
                                               "category": "snapchat"}
             for snap in group["snapList"]:
                 try:
-                    url, data = self._extract_story_item(dict(group), snap)
+                    if section == "Spotlight":
+                        url, data = self._extract_spotlight_item(dict(group), snap)
+                    else:
+                        url, data = self._extract_story_item(dict(group), snap)
                 except Exception as exc:
                     self.log.error("Skipped one snap (%s: %s)",
                                    exc.__class__.__name__, exc)

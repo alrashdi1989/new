@@ -31,6 +31,8 @@ import engine
 
 RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "settings",
             "compose", "login", "logout", "signup", "tos", "privacy", "hashtag", "intent"}
+IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
+               "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
 VIDEO_EXT = ("mp4", "mov", "m4v", "webm")
 
@@ -48,7 +50,7 @@ def parse_username(text):
 def resolve_link(text):
     """Return (site, name, url) for an X or TikTok link, or None.
 
-    site is "x" or "tiktok"; name is used for the folder and status text.
+    site is "x", "tiktok", "snapchat" or "instagram"; name is used for the folder and status text.
     """
     t = text.strip().split()[0] if text.strip() else ""
     if not t:
@@ -69,6 +71,23 @@ def resolve_link(text):
     m = re.match(r"^https?://(?:www\.|m\.)?tiktok\.com/@([\w.-]+)/?(?:[?#].*)?$", t, re.I)
     if m:
         return "tiktok", m.group(1), f"https://www.tiktok.com/@{m.group(1)}/posts"
+
+    # Instagram
+    ig = r"^https?://(?:www\.|m\.)?instagram\.com/"
+    m = re.match(ig + r"(?:[\w.]+/)?(p|reel|reels|tv)/([\w-]+)", t, re.I)
+    if m:
+        kind = "p" if m.group(1).lower() == "p" else "reel"
+        return "instagram", "posts", f"https://www.instagram.com/{kind}/{m.group(2)}/"
+    m = re.match(ig + r"stories/highlights/(\d+)", t, re.I)
+    if m:
+        return "instagram", "highlights", f"https://www.instagram.com/stories/highlights/{m.group(1)}/"
+    m = re.match(ig + r"stories/([\w.]+)(?:/(\d+))?", t, re.I)
+    if m:
+        u = f"https://www.instagram.com/stories/{m.group(1)}/" + (f"{m.group(2)}/" if m.group(2) else "")
+        return "instagram", m.group(1), u
+    m = re.match(ig + r"([\w.]{1,30})/?(?:[?#].*)?$", t, re.I)
+    if m and m.group(1).lower() not in IG_RESERVED:
+        return "instagram", m.group(1), f"https://www.instagram.com/{m.group(1)}/"
 
     # Snapchat single highlight / story link -> download just that one
     m = re.match(r"^https?://(?:www\.)?snapchat\.com/(?:@|add/)([\w.-]+)/(?:highlight/)?[^/?#]{20,}", t, re.I)
@@ -91,7 +110,7 @@ def resolve_link(text):
     return None
 
 
-def build_args(site, url, out_dir, auth_token, images, videos, retweets, tiktok_cookies=None):
+def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_cookies=None):
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     args = [
         "-d", out_dir,
@@ -100,7 +119,9 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, tiktok_
         # Android's shared storage rejects : ? * " < > | \ in file names
         "-o", "path-restrict=windows",
         "-o", "path-strip=windows",
-        "-o", 'directory=["{section}"]' if site == "snapchat" else "directory=[]",
+        "-o", ('directory=["{section}"]' if site == "snapchat" else
+               'directory=["{subcategory!c}"]' if site == "instagram" and is_ig_profile(url) else
+               "directory=[]"),
         "--filter", f"extension in {exts!r}",
     ]
     if site == "x":
@@ -109,28 +130,40 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, tiktok_
             args += ["-o", 'cookies={"auth_token": "%s"}' % auth_token.strip()]
     elif site == "tiktok":
         args += ["-o", "audio=false", "-o", "covers=false"]
-        if tiktok_cookies:  # the TikTok login is only ever sent to TikTok
-            args += ["-o", "cookies=" + json.dumps(tiktok_cookies)]
+        if site_cookies:  # the TikTok login is only ever sent to TikTok
+            args += ["-o", "cookies=" + json.dumps(site_cookies)]
+    elif site == "instagram":
+        if is_ig_profile(url):
+            args += ["-o", "include=stories,highlights,posts"]
+        if site_cookies:  # the Instagram login is only ever sent to Instagram
+            args += ["-o", "cookies=" + json.dumps(site_cookies)]
     # Report each post's id plus the profile's post count, so the app can show
     # "post N of ~total" (only meaningful for whole profiles).
     if site == "x" and url.endswith("/media"):
         args += ["--Print", "@@META {user[media_count]}|{tweet_id}"]
     elif site == "tiktok" and url.endswith("/posts"):
         args += ["--Print", "@@META {authorStats[videoCount]}|{id}"]
+    elif site == "instagram" and is_ig_profile(url):
+        args += ["--Print", "@@META 0|{post_shortcode|post_id|media_id}"]
     elif site == "snapchat" and url.startswith("snapfull:"):
         args += ["--Print", "@@META {_total}|{id}_{num}_{file_id}"]
     args.append(url)
     return args
 
 
-SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat"}
+SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram"}
+FOLDERS = {"tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram"}
+
+
+def is_ig_profile(url):
+    return re.fullmatch(r"https://www\.instagram\.com/[\w.]+/", url) is not None
 
 
 def output_dir(save_dir, site, name):
     # X keeps its original layout so earlier downloads aren't repeated.
     if site == "x":
         return os.path.join(save_dir, name)
-    return os.path.join(save_dir, "Snapchat" if site == "snapchat" else "TikTok", name)
+    return os.path.join(save_dir, FOLDERS[site], name)
 
 
 def download_root():
@@ -375,6 +408,7 @@ if platform == "android":
     SITE_URLS = {
         "x": ("https://x.com", "https://twitter.com", "https://www.x.com"),
         "tiktok": ("https://www.tiktok.com", "https://tiktok.com", "https://m.tiktok.com"),
+        "instagram": ("https://www.instagram.com", "https://instagram.com", "https://i.instagram.com"),
     }
 
     def webview_cookies(site):
@@ -605,7 +639,7 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "Save from X, TikTok and Snapchat"
+                    text: "X · TikTok · Snapchat · Instagram"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
@@ -627,7 +661,7 @@ KV = """
                         text: "PROFILE OR POST LINK"
                     GlassInput:
                         id: url
-                        hint_text: "X, TikTok or Snapchat link"
+                        hint_text: "Paste a profile or post link"
                     Caption:
                         text: "X ACCOUNT"
                     BoxLayout:
@@ -660,6 +694,22 @@ KV = """
                             size_hint_x: None
                             width: dp(124)
                             on_release: root.login("tiktok")
+                    Caption:
+                        text: "INSTAGRAM ACCOUNT  (required)"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        spacing: dp(8)
+                        GlassInput:
+                            id: ig_state
+                            readonly: True
+                            hint_text: "Not signed in"
+                        GhostButton:
+                            id: ig_btn
+                            text: "Log in"
+                            size_hint_x: None
+                            width: dp(124)
+                            on_release: root.login("instagram")
                     Caption:
                         text: "SAVE TO"
                     BoxLayout:
@@ -792,6 +842,9 @@ Builder.load_string(KV)
 IDLE, BUSY, OK, ERR = (1, 1, 1, .4), (.40, .85, 1, 1), (.30, .86, .64, 1), (.98, .45, .45, 1)
 
 
+ROW_IDS = {"tiktok": ("tt_state", "tt_btn"), "instagram": ("ig_state", "ig_btn")}
+
+
 class Root(FloatLayout):
     status_color = ListProperty(IDLE)
     busy = BooleanProperty(False)
@@ -812,9 +865,10 @@ class Root(FloatLayout):
             self.login_btn.text = "Signed in"
         self._login_active = False
         self._login_done = threading.Event()
-        if store.exists("tiktok"):
-            self.ids.tt_state.text = "Signed in"
-            self.ids.tt_btn.text = "Sign out"
+        for site, (state_id, btn_id) in ROW_IDS.items():
+            if store.exists(site):
+                self.ids[state_id].text = "Signed in"
+                self.ids[btn_id].text = "Sign out"
         self._job_poll = None
         self._log_pos = 0
         self.save_dir = store.get("folder")["path"] if store.exists("folder") else download_root()
@@ -881,6 +935,7 @@ class Root(FloatLayout):
     LOGIN = {
         "x": ("https://x.com/i/flow/login", "auth_token", "X"),
         "tiktok": ("https://www.tiktok.com/login/phone-or-email/email", "sessionid", "TikTok"),
+        "instagram": ("https://www.instagram.com/accounts/login/", "sessionid", "Instagram"),
     }
 
     def login(self, site="x"):
@@ -891,11 +946,12 @@ class Root(FloatLayout):
             self._login_done.set()
             self.set_status("Login reset. Tap Log in again.")
             return
-        if site == "tiktok" and self.store.exists("tiktok"):
-            self.store.delete("tiktok")
-            self.ids.tt_state.text = ""
-            self.ids.tt_btn.text = "Log in"
-            self.set_status("Signed out of TikTok in this app.")
+        if site in ROW_IDS and self.store.exists(site):
+            self.store.delete(site)
+            state_id, btn_id = ROW_IDS[site]
+            self.ids[state_id].text = ""
+            self.ids[btn_id].text = "Log in"
+            self.set_status(f"Signed out of {SITE_NAMES[site]} in this app.")
             self.set_state(IDLE)
             return
         url, _, name = self.LOGIN[site]
@@ -941,10 +997,11 @@ class Root(FloatLayout):
                 self.token.text = token
                 self.login_btn.text = "Signed in"
         else:
-            self.store.put("tiktok", cookies=jar)
+            self.store.put(site, cookies=jar)
+            state_id, btn_id = ROW_IDS[site]
             def _ok(*_):
-                self.ids.tt_state.text = "Signed in"
-                self.ids.tt_btn.text = "Sign out"
+                self.ids[state_id].text = "Signed in"
+                self.ids[btn_id].text = "Sign out"
         Clock.schedule_once(_ok)
         self.set_status(f"Logged in to {name}. Paste a link and tap Download.")
         self.set_state(OK)
@@ -967,7 +1024,7 @@ class Root(FloatLayout):
             return
         link = resolve_link(self.url.text)
         if not link:
-            self.set_status("Paste an X, TikTok or Snapchat link.")
+            self.set_status("Paste an X, TikTok, Snapchat or Instagram link.")
             self.set_state(ERR)
             return
         site, user, gurl = link
@@ -978,6 +1035,10 @@ class Root(FloatLayout):
         token = self.token.text.strip()
         if token:
             self.store.put("auth", token=token)
+        if site == "instagram" and not self.store.exists("instagram"):
+            self.set_status("Log in to Instagram first (Instagram account → Log in).")
+            self.set_state(ERR)
+            return
         if not self.ensure_access():
             self.set_status("Allow file access, then tap Download again.")
             return
@@ -986,7 +1047,8 @@ class Root(FloatLayout):
         spec = {
             "args": build_args(site, gurl, out, token, self.images.active,
                                self.videos.active, self.retweets.active,
-                               self.store.get("tiktok")["cookies"] if self.store.exists("tiktok") else None),
+                               self.store.get(site)["cookies"]
+                               if site in ROW_IDS and self.store.exists(site) else None),
             "out": out, "out_label": pretty_path(out), "site": site, "user": user,
             "status_dir": self.status_dir,
         }

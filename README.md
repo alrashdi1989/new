@@ -62,5 +62,14 @@ the app or lock the phone. Tap **Stop** in the app to cancel.
 
 Paste a public profile link (`snapchat.com/add/<user>` or `snapchat.com/@<user>`).
 The app downloads the current story (last 24 hours) into `Snapchat/<user>/Story/`
-and all saved highlights into `Snapchat/<user>/Highlights/`. Run it again later
+all saved highlights into `Snapchat/<user>/Highlights/`, and the Spotlight
+videos shown on the profile into `Snapchat/<user>/Spotlight/`. Run it again later
 to pick up new stories; snaps you already have are skipped.
+
+## Instagram
+
+Log in once (Instagram account → Log in, with username/email + password).
+Paste a profile link to download Stories, Highlights and Posts (incl. reels)
+into `Instagram/<user>/Stories|Highlights|Posts/`, or paste a single post,
+reel, story or highlight link. Instagram is slow on purpose (6–12 s between
+requests) to avoid account restrictions; consider using a spare account.
