@@ -1,0 +1,21 @@
+[app]
+title = X Media Downloader
+package.name = xmediadownloader
+package.domain = org.personal
+source.dir = .
+source.include_exts = py,png,jpg,kv,json
+version = 1.0
+requirements = python3,kivy,sqlite3,openssl,requests,urllib3,certifi,charset-normalizer,idna,gallery-dl
+orientation = portrait
+fullscreen = 0
+
+android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
+android.api = 34
+android.minapi = 24
+android.archs = arm64-v8a, armeabi-v7a
+android.accept_sdk_license = True
+android.allow_backup = True
+
+[buildozer]
+log_level = 2
+warn_on_root = 0
