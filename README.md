@@ -16,18 +16,14 @@ Paste a public X profile URL → tap **Download** → photos and videos land in
 > Have Linux / WSL? You can also build locally: `pip install buildozer cython`
 > then `buildozer android debug` in this folder.
 
-## 2. Get your `auth_token` (one time)
+## 2. Log in (one time)
 
-X only shows a profile's Media tab to logged-in users, so the app needs your
-login cookie:
+Tap **Log in to X** in the app, sign in on the X page that opens, and the app
+saves your login automatically (button turns into "Logged in ✓"). Press Back
+to cancel. Using a spare X account is safer if you download a lot.
 
-1. On a computer, log in to **x.com** in Chrome/Edge.
-2. Press **F12** → **Application** tab → **Cookies** → `https://x.com`.
-3. Copy the value of **auth_token**.
-4. Paste it into the second box in the app. It's saved on the phone only.
-
-Treat this value like a password — anyone who has it can use your X account.
-If it stops working, log in again and copy the new one.
+(Alternative: paste an `auth_token` cookie copied from a desktop browser —
+F12 → Application → Cookies → https://x.com → auth_token.)
 
 ## 3. Use it
 

@@ -4,8 +4,8 @@ package.name = xmediadownloader
 package.domain = org.personal
 source.dir = .
 source.include_exts = py,png,jpg,kv,json
-version = 1.0
-requirements = python3,kivy,sqlite3,openssl,requests,urllib3,certifi,charset-normalizer,idna,gallery-dl
+version = 1.1
+requirements = python3,kivy,android,pyjnius,sqlite3,openssl,requests,urllib3,certifi,charset-normalizer,idna,gallery-dl
 orientation = portrait
 fullscreen = 0
 

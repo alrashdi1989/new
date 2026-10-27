@@ -61,6 +61,66 @@ def download_root():
     return os.path.join(os.path.expanduser("~"), "Downloads", "X-media")
 
 
+# ---------- Android WebView login helpers ----------
+_webview = None
+
+if platform == "android":
+    from android.runnable import run_on_ui_thread  # type: ignore
+    from jnius import autoclass  # type: ignore
+
+    _activity = autoclass("org.kivy.android.PythonActivity").mActivity
+    _WebView = autoclass("android.webkit.WebView")
+    _WebViewClient = autoclass("android.webkit.WebViewClient")
+    _CookieManager = autoclass("android.webkit.CookieManager")
+    _LayoutParams = autoclass("android.view.ViewGroup$LayoutParams")
+
+    @run_on_ui_thread
+    def webview_open(url):
+        global _webview
+        if _webview is not None:
+            return
+        cm = _CookieManager.getInstance()
+        cm.setAcceptCookie(True)
+        wv = _WebView(_activity)
+        s = wv.getSettings()
+        s.setJavaScriptEnabled(True)
+        s.setDomStorageEnabled(True)
+        s.setUserAgentString(s.getUserAgentString().replace("; wv", ""))
+        cm.setAcceptThirdPartyCookies(wv, True)
+        wv.setWebViewClient(_WebViewClient())
+        _activity.addContentView(wv, _LayoutParams(-1, -1))
+        wv.loadUrl(url)
+        _webview = wv
+
+    @run_on_ui_thread
+    def webview_close():
+        global _webview
+        if _webview is None:
+            return
+        parent = _webview.getParent()
+        if parent is not None:
+            parent.removeView(_webview)
+        _webview.destroy()
+        _webview = None
+
+    def webview_auth_token():
+        cookies = _CookieManager.getInstance().getCookie("https://x.com") or ""
+        for part in cookies.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "auth_token" and v:
+                return v
+        return None
+else:
+    def webview_open(url):
+        pass
+
+    def webview_close():
+        pass
+
+    def webview_auth_token():
+        return None
+
+
 class LineWriter(io.TextIOBase):
     """Captures gallery-dl's console output line by line."""
     def __init__(self, callback):
@@ -92,9 +152,16 @@ class Root(BoxLayout):
         self.add_widget(self.url)
 
         saved = store.get("auth")["token"] if store.exists("auth") else ""
-        self.token = TextInput(text=saved, hint_text="x.com auth_token cookie (needed once)",
-                               password=True, multiline=False, size_hint_y=None, height=dp(46))
-        self.add_widget(self.token)
+        row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
+        self.token = TextInput(text=saved, hint_text="auth_token (or tap Log in)",
+                               password=True, multiline=False)
+        self.login_btn = Button(text="Logged in ✓" if saved else "Log in to X",
+                                size_hint_x=None, width=dp(130))
+        self.login_btn.bind(on_release=lambda *_: self.login())
+        row.add_widget(self.token)
+        row.add_widget(self.login_btn)
+        self.add_widget(row)
+        self._poll = None
 
         opts = BoxLayout(size_hint_y=None, height=dp(40))
         self.images, self.videos, self.retweets = CheckBox(active=True), CheckBox(active=True), CheckBox()
@@ -127,6 +194,43 @@ class Root(BoxLayout):
 
     def set_status(self, text):
         Clock.schedule_once(lambda *_: setattr(self.status, "text", text))
+
+    # ---- in-app X login (Android WebView) ----
+    def login(self):
+        if platform != "android":
+            self.set_status("In-app login works on Android only. Paste the token instead.")
+            return
+        if self._poll:
+            return
+        webview_open("https://x.com/i/flow/login")
+        self.set_status("Log in to X… (press Back to cancel)")
+        self._started = Clock.get_time()
+        self._poll = Clock.schedule_interval(self._check_cookie, 1)
+
+    def _check_cookie(self, *_):
+        token = webview_auth_token()
+        if token:
+            self.token.text = token
+            self.store.put("auth", token=token)
+            self.login_btn.text = "Logged in ✓"
+            self.set_status("Logged in. Paste a profile URL and tap Download.")
+            self.close_login()
+        elif Clock.get_time() - self._started > 900:
+            self.set_status("Login timed out.")
+            self.close_login()
+
+    def close_login(self):
+        if self._poll:
+            self._poll.cancel()
+            self._poll = None
+        webview_close()
+
+    def on_back(self):
+        if self._poll:
+            self.close_login()
+            self.set_status("Login cancelled.")
+            return True
+        return False
 
     def start(self):
         if self.running:
@@ -200,7 +304,14 @@ class XMediaApp(App):
         if platform == "android":
             from android.permissions import Permission, request_permissions  # type: ignore
             request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
-        return Root(JsonStore(os.path.join(self.user_data_dir, "settings.json")))
+        self.root_widget = Root(JsonStore(os.path.join(self.user_data_dir, "settings.json")))
+        Window.bind(on_keyboard=self._on_key)
+        return self.root_widget
+
+    def _on_key(self, window, key, *args):
+        if key == 27:  # Android Back
+            return self.root_widget.on_back()
+        return False
 
 
 if __name__ == "__main__":
