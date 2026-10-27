@@ -20,6 +20,7 @@ from kivy.lang import Builder
 from kivy.properties import ListProperty
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.modalview import ModalView
 from kivy.uix.textinput import TextInput
 from kivy.uix.togglebutton import ToggleButton
 from kivy.utils import platform
@@ -60,6 +61,89 @@ def download_root():
         from android.storage import primary_external_storage_path  # type: ignore
         return os.path.join(primary_external_storage_path(), "Download", "X-media")
     return os.path.join(os.path.expanduser("~"), "Downloads", "X-media")
+
+
+def pretty_path(path):
+    for prefix, name in (("/storage/emulated/0/", ""), (os.path.expanduser("~") + "/", "~/")):
+        if path.startswith(prefix):
+            return name + path[len(prefix):]
+    return path
+
+
+# ---------- storage permission + folder picker (Android) ----------
+PICK_FOLDER_REQ = 4242
+
+
+def sdk_int():
+    if platform != "android":
+        return 0
+    from jnius import autoclass  # type: ignore
+    return autoclass("android.os.Build$VERSION").SDK_INT
+
+
+def has_file_access():
+    if platform != "android":
+        return True
+    from jnius import autoclass  # type: ignore
+    if sdk_int() >= 30:
+        return bool(autoclass("android.os.Environment").isExternalStorageManager())
+    from android.permissions import Permission, check_permission  # type: ignore
+    return check_permission(Permission.WRITE_EXTERNAL_STORAGE)
+
+
+def request_file_access():
+    if platform != "android":
+        return
+    from jnius import autoclass  # type: ignore
+    if sdk_int() < 30:
+        from android.permissions import Permission, request_permissions  # type: ignore
+        request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
+        return
+    Intent = autoclass("android.content.Intent")
+    Settings = autoclass("android.provider.Settings")
+    Uri = autoclass("android.net.Uri")
+    act = autoclass("org.kivy.android.PythonActivity").mActivity
+    try:
+        intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:" + act.getPackageName()))
+        act.startActivity(intent)
+    except Exception:
+        act.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+
+
+def tree_uri_to_path(uri):
+    """content://...tree/primary:Pictures/X  ->  /storage/emulated/0/Pictures/X"""
+    from jnius import autoclass  # type: ignore
+    doc = autoclass("android.provider.DocumentsContract").getTreeDocumentId(uri)
+    volume, _, rel = doc.partition(":")
+    base = "/storage/emulated/0" if volume == "primary" else "/storage/" + volume
+    return os.path.join(base, rel) if rel else base
+
+
+def pick_folder(callback):
+    """Open Android's folder picker; callback(path or None) runs on the Kivy thread."""
+    if platform != "android":
+        callback(None)
+        return
+    from android import activity as android_activity  # type: ignore
+    from jnius import autoclass  # type: ignore
+
+    def on_result(request_code, result_code, data):
+        if request_code != PICK_FOLDER_REQ:
+            return
+        android_activity.unbind(on_activity_result=on_result)
+        path = None
+        try:
+            if result_code == -1 and data is not None and data.getData() is not None:
+                path = tree_uri_to_path(data.getData())
+        except Exception:
+            path = None
+        Clock.schedule_once(lambda *_: callback(path))
+
+    android_activity.bind(on_activity_result=on_result)
+    Intent = autoclass("android.content.Intent")
+    act = autoclass("org.kivy.android.PythonActivity").mActivity
+    act.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER_REQ)
 
 
 MEDIA_EXT = tuple("." + e for e in IMAGE_EXT + VIDEO_EXT)
@@ -364,6 +448,51 @@ KV = """
             size: self.width, self.height / 2
             radius: [dp(18), dp(18), 0, 0]
 
+<AccessPopup>:
+    background: ""
+    background_color: 0, 0, 0, 0
+    overlay_color: 0, 0, 0, .6
+    size_hint: .88, None
+    height: card.height
+    auto_dismiss: False
+    GlassCard:
+        id: card
+        canvas.before:
+            Color:
+                rgba: .07, .09, .18, .98
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(24)]
+        padding: dp(22)
+        spacing: dp(14)
+        Label:
+            text: "Allow file access"
+            bold: True
+            font_size: "20sp"
+            size_hint_y: None
+            height: dp(30)
+            halign: "left"
+            text_size: self.size
+        Label:
+            text: "To save photos and videos to the folder you choose, allow file access. On the next screen, turn on [b]Allow access to manage all files[/b], then come back."
+            markup: True
+            font_size: "14sp"
+            color: 1, 1, 1, .75
+            size_hint_y: None
+            text_size: self.width, None
+            height: self.texture_size[1]
+        PrimaryButton:
+            text: "Allow"
+            size_hint_y: None
+            height: dp(52)
+            on_release: root.allow()
+        GhostButton:
+            text: "Not now"
+            size_hint_y: None
+            height: dp(46)
+            on_release: root.dismiss()
+
 <Root>:
     Image:
         source: "bg.png"
@@ -425,6 +554,21 @@ KV = """
                     size_hint_x: None
                     width: dp(124)
                     on_release: root.login()
+            Caption:
+                text: "SAVE TO"
+            BoxLayout:
+                size_hint_y: None
+                height: dp(50)
+                spacing: dp(8)
+                GlassInput:
+                    id: folder
+                    readonly: True
+                    hint_text: "Download/X-media"
+                GhostButton:
+                    text: "Change"
+                    size_hint_x: None
+                    width: dp(124)
+                    on_release: root.choose_folder()
             Caption:
                 text: "INCLUDE"
             BoxLayout:
@@ -497,6 +641,12 @@ KV = """
 """
 
 
+class AccessPopup(ModalView):
+    def allow(self):
+        self.dismiss()
+        request_file_access()
+
+
 class GlassInput(TextInput):
     pass
 
@@ -539,18 +689,52 @@ class Root(FloatLayout):
         self._login_active = False
         self._login_done = threading.Event()
         self._new_files = []
+        self.save_dir = store.get("folder")["path"] if store.exists("folder") else download_root()
+        self.ids.folder.text = pretty_path(self.save_dir)
         # Make files from earlier downloads visible in Gallery.
         threading.Thread(target=self._initial_scan, daemon=True).start()
 
     def _initial_scan(self):
         try:
-            root = download_root()
-            if os.path.isdir(root):
+            root = self.save_dir
+            if has_file_access() and os.path.isdir(root):
                 n = media_scan_folder(root)
                 if n:
-                    self.write(f"{n} saved files are now visible in Gallery (Download/X-media).")
+                    self.write(f"{n} saved files are now visible in Gallery.")
         except Exception as e:
             self.write(f"Gallery scan issue: {e}")
+
+    # ---- save location ----
+    def ensure_access(self):
+        if has_file_access():
+            return True
+        AccessPopup().open()
+        return False
+
+    def choose_folder(self):
+        if not self.ensure_access():
+            return
+        pick_folder(self._folder_chosen)
+
+    def _folder_chosen(self, path):
+        if not path:
+            self.set_status("Folder not changed.")
+            return
+        try:
+            os.makedirs(path, exist_ok=True)
+            test = os.path.join(path, ".write_test")
+            open(test, "w").close()
+            os.remove(test)
+        except Exception as e:
+            self.set_status("Can't save to that folder. Pick another.")
+            self.set_state(ERR)
+            self.write(f"Folder error: {e}")
+            return
+        self.save_dir = path
+        self.store.put("folder", path=path)
+        self.ids.folder.text = pretty_path(path)
+        self.set_status("Save folder set.")
+        self.set_state(OK)
 
     def set_state(self, color):
         Clock.schedule_once(lambda *_: setattr(self, "status_color", color))
@@ -639,7 +823,10 @@ class Root(FloatLayout):
         token = self.token.text.strip()
         if token:
             self.store.put("auth", token=token)
-        out = os.path.join(download_root(), user)
+        if not self.ensure_access():
+            self.set_status("Allow file access, then tap Download again.")
+            return
+        out = os.path.join(self.save_dir, user)
         os.makedirs(out, exist_ok=True)
 
         self.log.text = ""
@@ -702,7 +889,7 @@ class Root(FloatLayout):
         msg = "Finished." if rc == 0 else f"Finished with errors (code {rc})."
         self.set_state(OK if rc == 0 else ERR)
         self.set_status(f"{msg} {self.count} new files")
-        self.write(f"Saved in: Download/X-media/{os.path.basename(out)}")
+        self.write(f"Saved in: {pretty_path(out)}")
         def _done(*_):
             self.running = False
             self.btn.disabled = False
@@ -715,12 +902,20 @@ class XMediaApp(App):
     def build(self):
         Window.softinput_mode = "below_target"
         Window.clearcolor = (9/255, 12/255, 28/255, 1)
-        if platform == "android":
-            from android.permissions import Permission, request_permissions  # type: ignore
-            request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
         self.root_widget = Root(JsonStore(os.path.join(self.user_data_dir, "settings.json")))
+        if platform == "android":
+            Clock.schedule_once(lambda *_: self.root_widget.ensure_access(), 1)
         Window.bind(on_keyboard=self._on_key)
         return self.root_widget
+
+    def on_pause(self):
+        return True  # keep running while the folder picker or Settings is open
+
+    def on_resume(self):
+        if has_file_access():
+            self.root_widget.set_status("File access allowed.")
+            self.root_widget.set_state(OK)
+            threading.Thread(target=self.root_widget._initial_scan, daemon=True).start()
 
     def _on_key(self, window, key, *args):
         if key == 27:  # Android Back

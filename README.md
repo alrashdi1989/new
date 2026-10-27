@@ -42,3 +42,9 @@ termux-setup-storage
 pip install gallery-dl
 gallery-dl -o 'cookies={"auth_token":"PASTE_TOKEN"}' -d ~/storage/downloads/X-media https://x.com/USERNAME/media
 ```
+
+## Save location and permission
+
+On first launch the app asks for file access (Android: "Allow access to manage
+all files"). Tap **Change** under *Save to* to pick any folder; each profile gets
+its own subfolder there, and files show up in Gallery / Google Photos.
