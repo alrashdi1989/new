@@ -16,12 +16,12 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.storage.jsonstore import JsonStore
-from kivy.uix.boxlayout import BoxLayout
+from kivy.lang import Builder
+from kivy.properties import ListProperty
 from kivy.uix.button import Button
-from kivy.uix.checkbox import CheckBox
-from kivy.uix.label import Label
-from kivy.uix.scrollview import ScrollView
+from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.textinput import TextInput
+from kivy.uix.togglebutton import ToggleButton
 from kivy.utils import platform
 
 RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "settings",
@@ -192,53 +192,296 @@ class LineWriter(io.TextIOBase):
         pass
 
 
-class Root(BoxLayout):
+KV = """
+#:import dp kivy.metrics.dp
+
+<GlassCard@BoxLayout>:
+    orientation: "vertical"
+    padding: dp(16)
+    spacing: dp(12)
+    size_hint_y: None
+    height: self.minimum_height
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, .07
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(24)]
+        Color:
+            rgba: 1, 1, 1, .16
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(24))
+            width: dp(1)
+        Color:
+            rgba: 1, 1, 1, .22
+        Line:
+            points: [self.x + dp(26), self.top - dp(1.5), self.right - dp(26), self.top - dp(1.5)]
+            width: dp(1)
+
+<Caption@Label>:
+    size_hint_y: None
+    height: dp(18)
+    font_size: "12sp"
+    color: 1, 1, 1, .55
+    halign: "left"
+    text_size: self.size
+
+<GlassInput>:
+    background_normal: "input_bg.png"
+    background_active: "input_active.png"
+    background_color: 1, 1, 1, 1
+    border: [42, 42, 42, 42]
+    foreground_color: 1, 1, 1, 1
+    hint_text_color: 1, 1, 1, .4
+    cursor_color: .40, .85, 1, 1
+    selection_color: .40, .85, 1, .35
+    multiline: False
+    write_tab: False
+    size_hint_y: None
+    height: dp(50)
+    font_size: "15sp"
+    padding: [dp(16), (self.height - self.line_height) / 2]
+
+<Chip>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    font_size: "14sp"
+    bold: self.state == "down"
+    color: (.04, .07, .14, 1) if self.state == "down" else (1, 1, 1, .8)
+    canvas.before:
+        Color:
+            rgba: (.40, .85, 1, .95) if self.state == "down" else (1, 1, 1, .07)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: (1, 1, 1, 0) if self.state == "down" else (1, 1, 1, .18)
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, self.height / 2)
+            width: dp(1)
+
+<GhostButton>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0, 0, 0, 0
+    font_size: "14sp"
+    color: 1, 1, 1, .95
+    canvas.before:
+        Color:
+            rgba: (1, 1, 1, .20) if self.state == "down" else (1, 1, 1, .10)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(16)]
+        Color:
+            rgba: 1, 1, 1, .22
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(16))
+            width: dp(1)
+
+<PrimaryButton>:
+    background_normal: ""
+    background_down: ""
+    background_disabled_normal: ""
+    background_color: 0, 0, 0, 0
+    font_size: "17sp"
+    bold: True
+    color: .03, .07, .12, 1
+    disabled_color: .03, .07, .12, .7
+    canvas.before:
+        Color:
+            rgba: (.30, .78, .62, .45) if self.disabled else ((.22, .72, .55, 1) if self.state == "down" else (.30, .86, .64, 1))
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(18)]
+        Color:
+            rgba: 1, 1, 1, .18
+        RoundedRectangle:
+            pos: self.x, self.center_y
+            size: self.width, self.height / 2
+            radius: [dp(18), dp(18), 0, 0]
+
+<Root>:
+    Image:
+        source: "bg.png"
+        allow_stretch: True
+        keep_ratio: False
+        size_hint: 1, 1
+        pos: root.pos
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: [dp(18), dp(30), dp(18), dp(18)]
+        spacing: dp(16)
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(60)
+            spacing: dp(12)
+            Image:
+                source: "icon.png"
+                size_hint: None, None
+                size: dp(54), dp(54)
+                pos_hint: {"center_y": .5}
+            BoxLayout:
+                orientation: "vertical"
+                Label:
+                    text: "Media Downloader"
+                    font_size: "22sp"
+                    bold: True
+                    halign: "left"
+                    valign: "bottom"
+                    text_size: self.size
+                Label:
+                    text: "Save photos and videos from X profiles"
+                    font_size: "13sp"
+                    color: 1, 1, 1, .6
+                    halign: "left"
+                    valign: "top"
+                    text_size: self.size
+
+        GlassCard:
+            Caption:
+                text: "PROFILE"
+            GlassInput:
+                id: url
+                hint_text: "https://x.com/username"
+            Caption:
+                text: "ACCOUNT"
+            BoxLayout:
+                size_hint_y: None
+                height: dp(50)
+                spacing: dp(8)
+                GlassInput:
+                    id: token
+                    hint_text: "auth_token"
+                    password: True
+                GhostButton:
+                    id: login_btn
+                    text: "Log in to X"
+                    size_hint_x: None
+                    width: dp(124)
+                    on_release: root.login()
+            Caption:
+                text: "INCLUDE"
+            BoxLayout:
+                size_hint_y: None
+                height: dp(40)
+                spacing: dp(8)
+                Chip:
+                    id: images
+                    text: "Photos"
+                    state: "down"
+                Chip:
+                    id: videos
+                    text: "Videos"
+                    state: "down"
+                Chip:
+                    id: retweets
+                    text: "Reposts"
+            Widget:
+                size_hint_y: None
+                height: dp(2)
+            PrimaryButton:
+                id: btn
+                text: "Downloading..." if self.disabled else "Download"
+                size_hint_y: None
+                height: dp(56)
+                on_release: root.start()
+
+        GlassCard:
+            size_hint_y: 1
+            height: 0
+            spacing: dp(8)
+            BoxLayout:
+                size_hint_y: None
+                height: dp(24)
+                spacing: dp(10)
+                Widget:
+                    size_hint: None, None
+                    size: dp(10), dp(10)
+                    pos_hint: {"center_y": .5}
+                    canvas:
+                        Color:
+                            rgba: root.status_color
+                        Ellipse:
+                            pos: self.pos
+                            size: self.size
+                Label:
+                    id: status
+                    text: "Ready"
+                    font_size: "14sp"
+                    halign: "left"
+                    valign: "middle"
+                    text_size: self.size
+                    shorten: True
+                    shorten_from: "right"
+            ScrollView:
+                id: scroll
+                bar_color: 1, 1, 1, .3
+                bar_width: dp(3)
+                Label:
+                    id: log
+                    size_hint_y: None
+                    height: max(self.texture_size[1], dp(10))
+                    text_size: self.width, None
+                    halign: "left"
+                    valign: "top"
+                    font_size: "12sp"
+                    font_name: "RobotoMono-Regular"
+                    color: 1, 1, 1, .72
+                    line_height: 1.15
+"""
+
+
+class GlassInput(TextInput):
+    pass
+
+
+class Chip(ToggleButton):
+    @property
+    def active(self):
+        return self.state == "down"
+
+
+class GhostButton(Button):
+    pass
+
+
+class PrimaryButton(Button):
+    pass
+
+
+Builder.load_string(KV)
+
+IDLE, BUSY, OK, ERR = (1, 1, 1, .4), (.40, .85, 1, 1), (.30, .86, .64, 1), (.98, .45, .45, 1)
+
+
+class Root(FloatLayout):
+    status_color = ListProperty(IDLE)
+
     def __init__(self, store, **kw):
-        super().__init__(orientation="vertical", padding=dp(14), spacing=dp(8), **kw)
+        super().__init__(**kw)
         self.store = store
         self.running = False
         self.count = 0
-
-        self.add_widget(Label(text="[b]X Media Downloader[/b]", markup=True,
-                              size_hint_y=None, height=dp(40), font_size="20sp"))
-        self.url = TextInput(hint_text="Profile URL  (https://x.com/username)", multiline=False,
-                             size_hint_y=None, height=dp(46))
-        self.add_widget(self.url)
-
+        ids = self.ids
+        self.url, self.token, self.login_btn = ids.url, ids.token, ids.login_btn
+        self.images, self.videos, self.retweets = ids.images, ids.videos, ids.retweets
+        self.btn, self.status, self.log, self.scroll = ids.btn, ids.status, ids.log, ids.scroll
         saved = store.get("auth")["token"] if store.exists("auth") else ""
-        row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
-        self.token = TextInput(text=saved, hint_text="auth_token (or tap Log in)",
-                               password=True, multiline=False)
-        self.login_btn = Button(text="Logged in ✓" if saved else "Log in to X",
-                                size_hint_x=None, width=dp(130))
-        self.login_btn.bind(on_release=lambda *_: self.login())
-        row.add_widget(self.token)
-        row.add_widget(self.login_btn)
-        self.add_widget(row)
+        self.token.text = saved
+        if saved:
+            self.login_btn.text = "Signed in"
         self._login_active = False
         self._login_done = threading.Event()
 
-        opts = BoxLayout(size_hint_y=None, height=dp(40))
-        self.images, self.videos, self.retweets = CheckBox(active=True), CheckBox(active=True), CheckBox()
-        for cb, txt in ((self.images, "Photos"), (self.videos, "Videos"), (self.retweets, "Reposts")):
-            opts.add_widget(cb)
-            opts.add_widget(Label(text=txt))
-        self.add_widget(opts)
-
-        self.btn = Button(text="Download", size_hint_y=None, height=dp(52), font_size="18sp")
-        self.btn.bind(on_release=lambda *_: self.start())
-        self.add_widget(self.btn)
-
-        self.status = Label(text="Ready.", size_hint_y=None, height=dp(30))
-        self.add_widget(self.status)
-
-        self.log = Label(text="", size_hint_y=None, halign="left", valign="top", font_size="12sp")
-        self.log.bind(width=lambda w, v: setattr(w, "text_size", (v, None)),
-                      texture_size=lambda w, v: setattr(w, "height", v[1]))
-        sv = ScrollView()
-        sv.add_widget(self.log)
-        self.scroll = sv
-        self.add_widget(sv)
+    def set_state(self, color):
+        Clock.schedule_once(lambda *_: setattr(self, "status_color", color))
 
     def write(self, line):
         def _do(*_):
@@ -286,12 +529,14 @@ class Root(BoxLayout):
             self.store.put("auth", token=token)
             def _ok(*_):
                 self.token.text = token
-                self.login_btn.text = "Logged in ✓"
+                self.login_btn.text = "Signed in"
             Clock.schedule_once(_ok)
             self.set_status("Logged in. Paste a profile URL and tap Download.")
+            self.set_state(OK)
         else:
             names = ", ".join(webview_cookie_names()) or "none"
             self.set_status("Login not detected. Try again.")
+            self.set_state(ERR)
             self.write(f"No auth_token found. Cookies seen: {names}")
 
     def on_back(self):
@@ -306,9 +551,11 @@ class Root(BoxLayout):
         user = parse_username(self.url.text)
         if not user:
             self.set_status("Invalid profile URL.")
+            self.set_state(ERR)
             return
         if not (self.images.active or self.videos.active):
-            self.set_status("Tick Photos and/or Videos.")
+            self.set_status("Pick Photos and/or Videos.")
+            self.set_state(ERR)
             return
         token = self.token.text.strip()
         if token:
@@ -321,6 +568,7 @@ class Root(BoxLayout):
         self.running = True
         self.btn.disabled = True
         self.set_status(f"Downloading @{user}…")
+        self.set_state(BUSY)
         args = build_args(user, out, token, self.images.active, self.videos.active, self.retweets.active)
         threading.Thread(target=self.run, args=(args, out), daemon=True).start()
 
@@ -329,7 +577,7 @@ class Root(BoxLayout):
             self.write("skip " + os.path.basename(line[1:].strip()))
         elif not line.startswith("[") and os.sep in line:
             self.count += 1
-            self.write("✓ " + os.path.basename(line))
+            self.write("+ " + os.path.basename(line))
             self.set_status(f"{self.count} files downloaded…")
         else:
             self.write(line)
@@ -357,6 +605,7 @@ class Root(BoxLayout):
         finally:
             sys.stdout, sys.stderr, sys.argv = old_out, old_err, old_argv
         msg = "Finished." if rc == 0 else f"Finished with errors (code {rc})."
+        self.set_state(OK if rc == 0 else ERR)
         self.set_status(f"{msg} {self.count} new files → {out}")
         def _done(*_):
             self.running = False
@@ -369,6 +618,7 @@ class XMediaApp(App):
 
     def build(self):
         Window.softinput_mode = "below_target"
+        Window.clearcolor = (9/255, 12/255, 28/255, 1)
         if platform == "android":
             from android.permissions import Permission, request_permissions  # type: ignore
             request_permissions([Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE])
