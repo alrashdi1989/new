@@ -659,9 +659,18 @@ KV = """
                 GlassCard:
                     Caption:
                         text: "PROFILE OR POST LINK"
-                    GlassInput:
-                        id: url
-                        hint_text: "Paste a profile or post link"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        spacing: dp(8)
+                        GlassInput:
+                            id: url
+                            hint_text: "Paste a profile or post link"
+                        GhostButton:
+                            text: "Clear" if url.text else "Paste"
+                            size_hint_x: None
+                            width: dp(96)
+                            on_release: root.paste_or_clear()
                     Caption:
                         text: "X ACCOUNT"
                     BoxLayout:
@@ -885,6 +894,23 @@ class Root(FloatLayout):
                     self.write(f"{n} saved files are now visible in Gallery.")
         except Exception as e:
             self.write(f"Gallery scan issue: {e}")
+
+    # ---- link box ----
+    def paste_or_clear(self):
+        if self.url.text:
+            self.url.text = ""
+            self.url.focus = True
+            return
+        try:
+            from kivy.core.clipboard import Clipboard
+            text = (Clipboard.paste() or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            self.url.text = text
+            self.url.cursor = (0, 0)
+        else:
+            self.set_status("Clipboard is empty. Copy a link first.")
 
     # ---- save location ----
     def ensure_access(self):
