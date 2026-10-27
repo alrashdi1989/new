@@ -144,20 +144,32 @@ if platform == "android":
             on_error(f"Could not open login page: {e}")
             on_done()
 
+    _View = autoclass("android.view.View")
+    _close_error = []
+
     @run_on_ui_thread
     def webview_close():
         global _container, _webview
         if _container is None:
             return
-        parent = _container.getParent()
-        if parent is not None:
-            parent.removeView(_container)
+        view, wv = _container, _webview
+        _container = _webview = None
         try:
-            _webview.stopLoading()
-            _webview.destroy()
+            # getParent() returns a ViewParent; it must be cast to ViewGroup to remove the view.
+            parent = view.getParent()
+            if parent is not None:
+                cast("android.view.ViewGroup", parent).removeView(view)
+        except Exception as e:
+            _close_error.append(str(e))
+            try:
+                view.setVisibility(_View.GONE)
+            except Exception as e2:
+                _close_error.append(str(e2))
+        try:
+            wv.stopLoading()
+            wv.destroy()
         except Exception:
             pass
-        _container = _webview = None
 
     def _cookie_string():
         cm = _CookieManager.getInstance()
@@ -548,6 +560,11 @@ class Root(FloatLayout):
                 pass
         webview_close()
         self._login_active = False
+        if platform == "android":
+            def _report(*_):
+                while _close_error:
+                    self.write("Close issue: " + _close_error.pop(0))
+            Clock.schedule_once(_report, 1.5)
         if token:
             self.store.put("auth", token=token)
             def _ok(*_):
