@@ -62,56 +62,107 @@ def download_root():
 
 
 # ---------- Android WebView login helpers ----------
+_container = None
 _webview = None
+_click_ref = None
 
 if platform == "android":
     from android.runnable import run_on_ui_thread  # type: ignore
-    from jnius import autoclass  # type: ignore
+    from jnius import PythonJavaClass, autoclass, java_method  # type: ignore
 
     _activity = autoclass("org.kivy.android.PythonActivity").mActivity
     _WebView = autoclass("android.webkit.WebView")
     _WebViewClient = autoclass("android.webkit.WebViewClient")
     _CookieManager = autoclass("android.webkit.CookieManager")
-    _LayoutParams = autoclass("android.view.ViewGroup$LayoutParams")
+    _LinearLayout = autoclass("android.widget.LinearLayout")
+    _LLParams = autoclass("android.widget.LinearLayout$LayoutParams")
+    _VGParams = autoclass("android.view.ViewGroup$LayoutParams")
+    _AButton = autoclass("android.widget.Button")
+    _Color = autoclass("android.graphics.Color")
+
+    class _ClickListener(PythonJavaClass):
+        __javainterfaces__ = ["android/view/View$OnClickListener"]
+        __javacontext__ = "app"
+
+        def __init__(self, callback):
+            super().__init__()
+            self.callback = callback
+
+        @java_method("(Landroid/view/View;)V")
+        def onClick(self, view):
+            self.callback()
 
     @run_on_ui_thread
-    def webview_open(url):
-        global _webview
-        if _webview is not None:
+    def webview_open(url, on_done):
+        global _container, _webview, _click_ref
+        if _container is not None:
             return
         cm = _CookieManager.getInstance()
         cm.setAcceptCookie(True)
+
+        box = _LinearLayout(_activity)
+        box.setOrientation(_LinearLayout.VERTICAL)
+        box.setBackgroundColor(_Color.WHITE)
+
+        btn = _AButton(_activity)
+        btn.setText("Done - back to app")
+        _click_ref = _ClickListener(on_done)
+        btn.setOnClickListener(_click_ref)
+        box.addView(btn, _LLParams(-1, -2))
+
         wv = _WebView(_activity)
-        s = wv.getSettings()
-        s.setJavaScriptEnabled(True)
-        s.setDomStorageEnabled(True)
-        s.setUserAgentString(s.getUserAgentString().replace("; wv", ""))
+        st = wv.getSettings()
+        st.setJavaScriptEnabled(True)
+        st.setDomStorageEnabled(True)
+        st.setUserAgentString(st.getUserAgentString().replace("; wv", ""))
         cm.setAcceptThirdPartyCookies(wv, True)
         wv.setWebViewClient(_WebViewClient())
-        _activity.addContentView(wv, _LayoutParams(-1, -1))
+        box.addView(wv, _LLParams(-1, 0, 1.0))
+
+        _activity.addContentView(box, _VGParams(-1, -1))
         wv.loadUrl(url)
-        _webview = wv
+        _container, _webview = box, wv
 
     @run_on_ui_thread
     def webview_close():
-        global _webview
-        if _webview is None:
+        global _container, _webview
+        if _container is None:
             return
-        parent = _webview.getParent()
+        parent = _container.getParent()
         if parent is not None:
-            parent.removeView(_webview)
-        _webview.destroy()
-        _webview = None
+            parent.removeView(_container)
+        try:
+            _webview.stopLoading()
+            _webview.destroy()
+        except Exception:
+            pass
+        _container = _webview = None
+
+    def _cookie_string():
+        cm = _CookieManager.getInstance()
+        parts = []
+        for u in ("https://x.com", "https://twitter.com", "https://www.x.com"):
+            c = cm.getCookie(u)
+            if c:
+                parts.append(c)
+        return "; ".join(parts)
 
     def webview_auth_token():
-        cookies = _CookieManager.getInstance().getCookie("https://x.com") or ""
-        for part in cookies.split(";"):
+        for part in _cookie_string().split(";"):
             k, _, v = part.strip().partition("=")
             if k == "auth_token" and v:
                 return v
         return None
+
+    def webview_cookie_names():
+        names = []
+        for part in _cookie_string().split(";"):
+            k = part.strip().partition("=")[0]
+            if k and k not in names:
+                names.append(k)
+        return names
 else:
-    def webview_open(url):
+    def webview_open(url, on_done):
         pass
 
     def webview_close():
@@ -119,6 +170,9 @@ else:
 
     def webview_auth_token():
         return None
+
+    def webview_cookie_names():
+        return []
 
 
 class LineWriter(io.TextIOBase):
@@ -161,7 +215,8 @@ class Root(BoxLayout):
         row.add_widget(self.token)
         row.add_widget(self.login_btn)
         self.add_widget(row)
-        self._poll = None
+        self._login_active = False
+        self._login_done = threading.Event()
 
         opts = BoxLayout(size_hint_y=None, height=dp(40))
         self.images, self.videos, self.retweets = CheckBox(active=True), CheckBox(active=True), CheckBox()
@@ -200,35 +255,48 @@ class Root(BoxLayout):
         if platform != "android":
             self.set_status("In-app login works on Android only. Paste the token instead.")
             return
-        if self._poll:
+        if self._login_active:
             return
-        webview_open("https://x.com/i/flow/login")
-        self.set_status("Log in to X… (press Back to cancel)")
-        self._started = Clock.get_time()
-        self._poll = Clock.schedule_interval(self._check_cookie, 1)
+        self._login_active = True
+        self._login_done = threading.Event()
+        webview_open("https://x.com/i/flow/login", self._login_done.set)
+        self.set_status("Log in to X, then wait or tap Done.")
+        threading.Thread(target=self._watch_login, daemon=True).start()
 
-    def _check_cookie(self, *_):
-        token = webview_auth_token()
-        if token:
-            self.token.text = token
-            self.store.put("auth", token=token)
-            self.login_btn.text = "Logged in ✓"
-            self.set_status("Logged in. Paste a profile URL and tap Download.")
-            self.close_login()
-        elif Clock.get_time() - self._started > 900:
-            self.set_status("Login timed out.")
-            self.close_login()
-
-    def close_login(self):
-        if self._poll:
-            self._poll.cancel()
-            self._poll = None
+    def _watch_login(self):
+        # Runs off the UI threads so it keeps working while the login page is on top.
+        import time
+        token, deadline = None, time.time() + 900
+        while time.time() < deadline:
+            try:
+                token = webview_auth_token()
+            except Exception as e:
+                self.write(f"Login check error: {e}")
+            if token or self._login_done.is_set():
+                break
+            time.sleep(1)
+        if not token:
+            try:
+                token = webview_auth_token()
+            except Exception:
+                pass
         webview_close()
+        self._login_active = False
+        if token:
+            self.store.put("auth", token=token)
+            def _ok(*_):
+                self.token.text = token
+                self.login_btn.text = "Logged in ✓"
+            Clock.schedule_once(_ok)
+            self.set_status("Logged in. Paste a profile URL and tap Download.")
+        else:
+            names = ", ".join(webview_cookie_names()) or "none"
+            self.set_status("Login not detected. Try again.")
+            self.write(f"No auth_token found. Cookies seen: {names}")
 
     def on_back(self):
-        if self._poll:
-            self.close_login()
-            self.set_status("Login cancelled.")
+        if self._login_active:
+            self._login_done.set()
             return True
         return False
 
