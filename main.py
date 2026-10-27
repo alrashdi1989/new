@@ -68,7 +68,7 @@ _click_ref = None
 
 if platform == "android":
     from android.runnable import run_on_ui_thread  # type: ignore
-    from jnius import PythonJavaClass, autoclass, java_method  # type: ignore
+    from jnius import PythonJavaClass, autoclass, cast, java_method  # type: ignore
 
     _activity = autoclass("org.kivy.android.PythonActivity").mActivity
     _WebView = autoclass("android.webkit.WebView")
@@ -92,24 +92,14 @@ if platform == "android":
         def onClick(self, view):
             self.callback()
 
-    @run_on_ui_thread
-    def webview_open(url, on_done):
-        global _container, _webview, _click_ref
-        if _container is not None:
-            return
+    _String = autoclass("java.lang.String")
+
+    def _jtext(text):
+        return cast("java.lang.CharSequence", _String(text))
+
+    def _make_webview(url):
         cm = _CookieManager.getInstance()
         cm.setAcceptCookie(True)
-
-        box = _LinearLayout(_activity)
-        box.setOrientation(_LinearLayout.VERTICAL)
-        box.setBackgroundColor(_Color.WHITE)
-
-        btn = _AButton(_activity)
-        btn.setText("Done - back to app")
-        _click_ref = _ClickListener(on_done)
-        btn.setOnClickListener(_click_ref)
-        box.addView(btn, _LLParams(-1, -2))
-
         wv = _WebView(_activity)
         st = wv.getSettings()
         st.setJavaScriptEnabled(True)
@@ -117,11 +107,42 @@ if platform == "android":
         st.setUserAgentString(st.getUserAgentString().replace("; wv", ""))
         cm.setAcceptThirdPartyCookies(wv, True)
         wv.setWebViewClient(_WebViewClient())
-        box.addView(wv, _LLParams(-1, 0, 1.0))
+        return wv
 
-        _activity.addContentView(box, _VGParams(-1, -1))
-        wv.loadUrl(url)
-        _container, _webview = box, wv
+    @run_on_ui_thread
+    def webview_open(url, on_done, on_error):
+        global _container, _webview, _click_ref
+        if _container is not None:
+            return
+        # Preferred: login page with a "Done" bar on top.
+        try:
+            wv = _make_webview(url)
+            box = _LinearLayout(_activity)
+            box.setOrientation(_LinearLayout.VERTICAL)
+            box.setBackgroundColor(_Color.WHITE)
+            btn = _AButton(_activity)
+            btn.setText(_jtext("Done - back to app"))
+            _click_ref = _ClickListener(on_done)
+            btn.setOnClickListener(_click_ref)
+            box.addView(btn, _LLParams(-1, -2))
+            lp = _LLParams(-1, 0)
+            lp.weight = 1.0
+            box.addView(wv, lp)
+            _activity.addContentView(box, _VGParams(-1, -1))
+            wv.loadUrl(url)
+            _container, _webview = box, wv
+            return
+        except Exception as e:
+            on_error(f"Login bar failed ({e}); opening plain login page.")
+        # Fallback: plain full-screen login page (Back returns to the app).
+        try:
+            wv = _make_webview(url)
+            _activity.addContentView(wv, _VGParams(-1, -1))
+            wv.loadUrl(url)
+            _container, _webview = wv, wv
+        except Exception as e:
+            on_error(f"Could not open login page: {e}")
+            on_done()
 
     @run_on_ui_thread
     def webview_close():
@@ -162,7 +183,7 @@ if platform == "android":
                 names.append(k)
         return names
 else:
-    def webview_open(url, on_done):
+    def webview_open(url, on_done, on_error):
         pass
 
     def webview_close():
@@ -499,10 +520,12 @@ class Root(FloatLayout):
             self.set_status("In-app login works on Android only. Paste the token instead.")
             return
         if self._login_active:
+            self._login_done.set()
+            self.set_status("Login reset. Tap Log in to X again.")
             return
         self._login_active = True
         self._login_done = threading.Event()
-        webview_open("https://x.com/i/flow/login", self._login_done.set)
+        webview_open("https://x.com/i/flow/login", self._login_done.set, self.write)
         self.set_status("Log in to X, then wait or tap Done.")
         threading.Thread(target=self._watch_login, daemon=True).start()
 
