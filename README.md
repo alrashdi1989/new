@@ -52,7 +52,7 @@ its own subfolder there, and files show up in Gallery / Google Photos.
 ## TikTok and background downloads
 
 Paste any TikTok profile (`tiktok.com/@user`), video, photo post or short share
-link (`vm.tiktok.com/...`). No TikTok login is needed for public accounts.
+link (`vm.tiktok.com/...`). No TikTok login is needed for public accounts; tap **Log in** under TikTok account for private accounts (use username/email + password, not Google).
 TikTok files go to `<Save to>/TikTok/<user>/`.
 
 Downloads run in a background service with a notification, so you can leave

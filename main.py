@@ -6,6 +6,7 @@ tap Download. Files go to  Download/X-media/<username>/  on the phone.
 """
 
 import io
+import json
 import os
 import re
 import sys
@@ -80,7 +81,7 @@ def resolve_link(text):
     return None
 
 
-def build_args(site, url, out_dir, auth_token, images, videos, retweets):
+def build_args(site, url, out_dir, auth_token, images, videos, retweets, tiktok_cookies=None):
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     args = [
         "-d", out_dir,
@@ -95,6 +96,8 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets):
             args += ["-o", 'cookies={"auth_token": "%s"}' % auth_token.strip()]
     else:
         args += ["-o", "audio=false", "-o", "covers=false"]
+        if tiktok_cookies:  # the TikTok login is only ever sent to TikTok
+            args += ["-o", "cookies=" + json.dumps(tiktok_cookies)]
     args.append(url)
     return args
 
@@ -345,29 +348,21 @@ if platform == "android":
         except Exception:
             pass
 
-    def _cookie_string():
+    SITE_URLS = {
+        "x": ("https://x.com", "https://twitter.com", "https://www.x.com"),
+        "tiktok": ("https://www.tiktok.com", "https://tiktok.com", "https://m.tiktok.com"),
+    }
+
+    def webview_cookies(site):
         cm = _CookieManager.getInstance()
-        parts = []
-        for u in ("https://x.com", "https://twitter.com", "https://www.x.com"):
-            c = cm.getCookie(u)
-            if c:
-                parts.append(c)
-        return "; ".join(parts)
+        jar = {}
+        for u in SITE_URLS[site]:
+            for part in (cm.getCookie(u) or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k and v:
+                    jar[k] = v
+        return jar
 
-    def webview_auth_token():
-        for part in _cookie_string().split(";"):
-            k, _, v = part.strip().partition("=")
-            if k == "auth_token" and v:
-                return v
-        return None
-
-    def webview_cookie_names():
-        names = []
-        for part in _cookie_string().split(";"):
-            k = part.strip().partition("=")[0]
-            if k and k not in names:
-                names.append(k)
-        return names
 else:
     def webview_open(url, on_done, on_error):
         pass
@@ -375,11 +370,8 @@ else:
     def webview_close():
         pass
 
-    def webview_auth_token():
-        return None
-
-    def webview_cookie_names():
-        return []
+    def webview_cookies(site):
+        return {}
 
 
 class LineWriter(io.TextIOBase):
@@ -603,7 +595,7 @@ KV = """
                 id: url
                 hint_text: "x.com/user  or  tiktok.com/@user"
             Caption:
-                text: "X ACCOUNT  (not needed for TikTok)"
+                text: "X ACCOUNT"
             BoxLayout:
                 size_hint_y: None
                 height: dp(50)
@@ -617,7 +609,23 @@ KV = """
                     text: "Log in to X"
                     size_hint_x: None
                     width: dp(124)
-                    on_release: root.login()
+                    on_release: root.login("x")
+            Caption:
+                text: "TIKTOK ACCOUNT  (optional, for private accounts)"
+            BoxLayout:
+                size_hint_y: None
+                height: dp(50)
+                spacing: dp(8)
+                GlassInput:
+                    id: tt_state
+                    readonly: True
+                    hint_text: "Not signed in"
+                GhostButton:
+                    id: tt_btn
+                    text: "Log in"
+                    size_hint_x: None
+                    width: dp(124)
+                    on_release: root.login("tiktok")
             Caption:
                 text: "SAVE TO"
             BoxLayout:
@@ -753,6 +761,9 @@ class Root(FloatLayout):
             self.login_btn.text = "Signed in"
         self._login_active = False
         self._login_done = threading.Event()
+        if store.exists("tiktok"):
+            self.ids.tt_state.text = "Signed in"
+            self.ids.tt_btn.text = "Sign out"
         self._job_poll = None
         self._log_pos = 0
         self.save_dir = store.get("folder")["path"] if store.exists("folder") else download_root()
@@ -816,35 +827,48 @@ class Root(FloatLayout):
         Clock.schedule_once(lambda *_: setattr(self.status, "text", text))
 
     # ---- in-app X login (Android WebView) ----
-    def login(self):
+    LOGIN = {
+        "x": ("https://x.com/i/flow/login", "auth_token", "X"),
+        "tiktok": ("https://www.tiktok.com/login/phone-or-email/email", "sessionid", "TikTok"),
+    }
+
+    def login(self, site="x"):
         if platform != "android":
-            self.set_status("In-app login works on Android only. Paste the token instead.")
+            self.set_status("In-app login works on Android only.")
             return
         if self._login_active:
             self._login_done.set()
-            self.set_status("Login reset. Tap Log in to X again.")
+            self.set_status("Login reset. Tap Log in again.")
             return
+        if site == "tiktok" and self.store.exists("tiktok"):
+            self.store.delete("tiktok")
+            self.ids.tt_state.text = ""
+            self.ids.tt_btn.text = "Log in"
+            self.set_status("Signed out of TikTok in this app.")
+            self.set_state(IDLE)
+            return
+        url, _, name = self.LOGIN[site]
         self._login_active = True
         self._login_done = threading.Event()
-        webview_open("https://x.com/i/flow/login", self._login_done.set, self.write)
-        self.set_status("Log in to X, then wait or tap Done.")
-        threading.Thread(target=self._watch_login, daemon=True).start()
+        webview_open(url, self._login_done.set, self.write)
+        self.set_status(f"Log in to {name} with username/email and password, then wait or tap Done.")
+        threading.Thread(target=self._watch_login, args=(site,), daemon=True).start()
 
-    def _watch_login(self):
+    def _watch_login(self, site):
         # Runs off the UI threads so it keeps working while the login page is on top.
-        import time
-        token, deadline = None, time.time() + 900
+        _, key, name = self.LOGIN[site]
+        jar, deadline = {}, time.time() + 900
         while time.time() < deadline:
             try:
-                token = webview_auth_token()
+                jar = webview_cookies(site)
             except Exception as e:
                 self.write(f"Login check error: {e}")
-            if token or self._login_done.is_set():
+            if jar.get(key) or self._login_done.is_set():
                 break
             time.sleep(1)
-        if not token:
+        if not jar.get(key):
             try:
-                token = webview_auth_token()
+                jar = webview_cookies(site)
             except Exception:
                 pass
         webview_close()
@@ -854,19 +878,25 @@ class Root(FloatLayout):
                 while _close_error:
                     self.write("Close issue: " + _close_error.pop(0))
             Clock.schedule_once(_report, 1.5)
-        if token:
+        if not jar.get(key):
+            self.set_status(f"{name} login not detected. Try again.")
+            self.set_state(ERR)
+            self.write(f"No {key} found. Cookies seen: {', '.join(jar) or 'none'}")
+            return
+        if site == "x":
+            token = jar[key]
             self.store.put("auth", token=token)
             def _ok(*_):
                 self.token.text = token
                 self.login_btn.text = "Signed in"
-            Clock.schedule_once(_ok)
-            self.set_status("Logged in. Paste a profile URL and tap Download.")
-            self.set_state(OK)
         else:
-            names = ", ".join(webview_cookie_names()) or "none"
-            self.set_status("Login not detected. Try again.")
-            self.set_state(ERR)
-            self.write(f"No auth_token found. Cookies seen: {names}")
+            self.store.put("tiktok", cookies=jar)
+            def _ok(*_):
+                self.ids.tt_state.text = "Signed in"
+                self.ids.tt_btn.text = "Sign out"
+        Clock.schedule_once(_ok)
+        self.set_status(f"Logged in to {name}. Paste a link and tap Download.")
+        self.set_state(OK)
 
     def on_back(self):
         if self._login_active:
@@ -904,7 +934,8 @@ class Root(FloatLayout):
         os.makedirs(out, exist_ok=True)
         spec = {
             "args": build_args(site, gurl, out, token, self.images.active,
-                               self.videos.active, self.retweets.active),
+                               self.videos.active, self.retweets.active,
+                               self.store.get("tiktok")["cookies"] if self.store.exists("tiktok") else None),
             "out": out, "out_label": pretty_path(out), "site": site, "user": user,
             "status_dir": self.status_dir,
         }
