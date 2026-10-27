@@ -4,10 +4,13 @@ package.name = xmediadownloader
 package.domain = org.personal
 source.dir = .
 source.include_exts = py,png,jpg,kv,json
-version = 1.2
+version = 1.3
 requirements = python3,kivy,android,pyjnius,sqlite3,openssl,requests,urllib3,certifi,charset-normalizer,idna,gallery-dl
 orientation = portrait
 fullscreen = 0
+icon.filename = %(source.dir)s/icon.png
+presplash.filename = %(source.dir)s/presplash.png
+android.presplash_color = #111827
 
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
 android.api = 34
