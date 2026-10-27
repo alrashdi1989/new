@@ -57,3 +57,10 @@ TikTok files go to `<Save to>/TikTok/<user>/`.
 
 Downloads run in a background service with a notification, so you can leave
 the app or lock the phone. Tap **Stop** in the app to cancel.
+
+## Snapchat
+
+Paste a public profile link (`snapchat.com/add/<user>` or `snapchat.com/@<user>`).
+The app downloads the current story (last 24 hours) into `Snapchat/<user>/Story/`
+and all saved highlights into `Snapchat/<user>/Highlights/`. Run it again later
+to pick up new stories; snaps you already have are skipped.

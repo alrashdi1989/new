@@ -70,6 +70,16 @@ def resolve_link(text):
     if m:
         return "tiktok", m.group(1), f"https://www.tiktok.com/@{m.group(1)}/posts"
 
+    # Snapchat single highlight / story link -> download just that one
+    m = re.match(r"^https?://(?:www\.)?snapchat\.com/(?:@|add/)([\w.-]+)/(?:highlight/)?[^/?#]{20,}", t, re.I)
+    if m:
+        return "snapchat", m.group(1), t.split("?")[0]
+    # Snapchat public profile -> current story + all highlights
+    m = re.match(r"^https?://(?:www\.)?snapchat\.com/(?:@|add/)([\w.-]+)/?(?:[?#].*)?$", t, re.I) or \
+        re.match(r"^https?://story\.snapchat\.com/(?:s/|@)?([\w.-]+)/?(?:[?#].*)?$", t, re.I)
+    if m:
+        return "snapchat", m.group(1), "snapfull:" + m.group(1)
+
     # X single post
     m = re.match(r"^https?://(?:www\.|mobile\.)?(?:x|twitter)\.com/(\w{1,15})/status/(\d+)", t, re.I)
     if m:
@@ -87,32 +97,37 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, tiktok_
         "-d", out_dir,
         "--download-archive", os.path.join(out_dir, ".downloaded.sqlite3"),
         "-o", "videos=true",
-        "-o", "directory=[]",
+        "-o", 'directory=["{section}"]' if site == "snapchat" else "directory=[]",
         "--filter", f"extension in {exts!r}",
     ]
     if site == "x":
         args += ["-o", f"retweets={'true' if retweets else 'false'}"]
         if auth_token:  # the X login is only ever sent to X
             args += ["-o", 'cookies={"auth_token": "%s"}' % auth_token.strip()]
-    else:
+    elif site == "tiktok":
         args += ["-o", "audio=false", "-o", "covers=false"]
         if tiktok_cookies:  # the TikTok login is only ever sent to TikTok
             args += ["-o", "cookies=" + json.dumps(tiktok_cookies)]
     # Report each post's id plus the profile's post count, so the app can show
     # "post N of ~total" (only meaningful for whole profiles).
     if site == "x" and url.endswith("/media"):
-        args += ["--print", "@@META {user[media_count]}|{tweet_id}"]
+        args += ["--Print", "@@META {user[media_count]}|{tweet_id}"]
     elif site == "tiktok" and url.endswith("/posts"):
-        args += ["--print", "@@META {authorStats[videoCount]}|{id}"]
+        args += ["--Print", "@@META {authorStats[videoCount]}|{id}"]
+    elif site == "snapchat" and url.startswith("snapfull:"):
+        args += ["--Print", "@@META {_total}|{id}_{num}_{file_id}"]
     args.append(url)
     return args
+
+
+SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat"}
 
 
 def output_dir(save_dir, site, name):
     # X keeps its original layout so earlier downloads aren't repeated.
     if site == "x":
         return os.path.join(save_dir, name)
-    return os.path.join(save_dir, "TikTok", name)
+    return os.path.join(save_dir, "Snapchat" if site == "snapchat" else "TikTok", name)
 
 
 def download_root():
@@ -587,7 +602,7 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "Save photos and videos from X and TikTok"
+                    text: "Save photos and videos from X, TikTok, Snapchat"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
@@ -599,7 +614,7 @@ KV = """
                 text: "PROFILE OR POST LINK"
             GlassInput:
                 id: url
-                hint_text: "x.com/user  or  tiktok.com/@user"
+                hint_text: "X, TikTok or Snapchat link"
             Caption:
                 text: "X ACCOUNT"
             BoxLayout:
@@ -940,7 +955,7 @@ class Root(FloatLayout):
             return
         link = resolve_link(self.url.text)
         if not link:
-            self.set_status("Paste an X or TikTok link.")
+            self.set_status("Paste an X, TikTok or Snapchat link.")
             self.set_state(ERR)
             return
         site, user, gurl = link
@@ -974,7 +989,7 @@ class Root(FloatLayout):
         self._log_pos = 0
         self.progress = -1
         self.busy = True
-        self.set_status(f"Downloading {'TikTok' if site == 'tiktok' else 'X'} @{user}…")
+        self.set_status(f"Downloading {SITE_NAMES[site]} @{user}…")
         self.set_state(BUSY)
         if platform == "android":
             try:

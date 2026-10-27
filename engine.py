@@ -2,7 +2,7 @@
 Download engine shared by the app (desktop) and the Android background service.
 
 A job is described by a dict:
-    {"args": [...gallery-dl args...], "out": folder, "site": "x"|"tiktok",
+    {"args": [...gallery-dl args...], "out": folder, "site": "x"|"tiktok"|"snapchat",
      "user": name, "status_dir": folder for job.json / job.log / cancel}
 
 Progress is written to files in status_dir so the app can show it even when
@@ -162,6 +162,8 @@ class Job:
         self.log("Fetching media list…")
 
         import gallery_dl
+        import snapext
+        snapext.register()
         rc, result = 1, "error"
         old = sys.stdout, sys.stderr, sys.argv
         logging.getLogger().handlers.clear()
