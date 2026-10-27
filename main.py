@@ -46,6 +46,7 @@ def build_args(user, out_dir, auth_token, images, videos, retweets):
         "--download-archive", os.path.join(out_dir, ".downloaded.sqlite3"),
         "-o", f"retweets={'true' if retweets else 'false'}",
         "-o", "videos=true",
+        "-o", "directory=[]",
         "--filter", f"extension in {exts!r}",
     ]
     if auth_token:
@@ -59,6 +60,31 @@ def download_root():
         from android.storage import primary_external_storage_path  # type: ignore
         return os.path.join(primary_external_storage_path(), "Download", "X-media")
     return os.path.join(os.path.expanduser("~"), "Downloads", "X-media")
+
+
+MEDIA_EXT = tuple("." + e for e in IMAGE_EXT + VIDEO_EXT)
+
+
+def media_scan(paths):
+    """Tell Android about new files so they appear in Gallery / Files."""
+    if platform != "android" or not paths:
+        return
+    from jnius import autoclass  # type: ignore
+    scanner = autoclass("android.media.MediaScannerConnection")
+    ctx = autoclass("org.kivy.android.PythonActivity").mActivity
+    paths = list(paths)
+    for i in range(0, len(paths), 200):
+        scanner.scanFile(ctx, paths[i:i + 200], None, None)
+
+
+def media_scan_folder(root):
+    found = []
+    for dirpath, _, files in os.walk(root):
+        for f in files:
+            if f.lower().endswith(MEDIA_EXT):
+                found.append(os.path.join(dirpath, f))
+    media_scan(found)
+    return len(found)
 
 
 # ---------- Android WebView login helpers ----------
@@ -512,13 +538,26 @@ class Root(FloatLayout):
             self.login_btn.text = "Signed in"
         self._login_active = False
         self._login_done = threading.Event()
+        self._new_files = []
+        # Make files from earlier downloads visible in Gallery.
+        threading.Thread(target=self._initial_scan, daemon=True).start()
+
+    def _initial_scan(self):
+        try:
+            root = download_root()
+            if os.path.isdir(root):
+                n = media_scan_folder(root)
+                if n:
+                    self.write(f"{n} saved files are now visible in Gallery (Download/X-media).")
+        except Exception as e:
+            self.write(f"Gallery scan issue: {e}")
 
     def set_state(self, color):
         Clock.schedule_once(lambda *_: setattr(self, "status_color", color))
 
     def write(self, line):
         def _do(*_):
-            lines = (self.log.text + line + "\n").splitlines()[-300:]
+            lines = (self.log.text + line + "\n").splitlines()[-60:]
             self.log.text = "\n".join(lines) + "\n"
             self.scroll.scroll_y = 0
         Clock.schedule_once(_do)
@@ -605,6 +644,7 @@ class Root(FloatLayout):
 
         self.log.text = ""
         self.count = 0
+        self._new_files = []
         self.running = True
         self.btn.disabled = True
         self.set_status(f"Downloading @{user}…")
@@ -612,11 +652,21 @@ class Root(FloatLayout):
         args = build_args(user, out, token, self.images.active, self.videos.active, self.retweets.active)
         threading.Thread(target=self.run, args=(args, out), daemon=True).start()
 
+    def _flush_scan(self):
+        batch, self._new_files = self._new_files, []
+        try:
+            media_scan(batch)
+        except Exception as e:
+            self.write(f"Gallery scan issue: {e}")
+
     def on_line(self, line):
         if line.startswith("#"):
             self.write("skip " + os.path.basename(line[1:].strip()))
         elif not line.startswith("[") and os.sep in line:
             self.count += 1
+            self._new_files.append(line.strip())
+            if len(self._new_files) >= 25:
+                self._flush_scan()
             self.write("+ " + os.path.basename(line))
             self.set_status(f"{self.count} files downloaded…")
         else:
@@ -644,9 +694,15 @@ class Root(FloatLayout):
             self.write(f"Error: {e}")
         finally:
             sys.stdout, sys.stderr, sys.argv = old_out, old_err, old_argv
+        self._flush_scan()
+        try:
+            media_scan_folder(out)  # also catches files from older versions
+        except Exception as e:
+            self.write(f"Gallery scan issue: {e}")
         msg = "Finished." if rc == 0 else f"Finished with errors (code {rc})."
         self.set_state(OK if rc == 0 else ERR)
-        self.set_status(f"{msg} {self.count} new files → {out}")
+        self.set_status(f"{msg} {self.count} new files")
+        self.write(f"Saved in: Download/X-media/{os.path.basename(out)}")
         def _done(*_):
             self.running = False
             self.btn.disabled = False

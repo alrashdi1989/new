@@ -1,7 +1,7 @@
 # X Media Downloader (Android)
 
 Paste a public X profile URL → tap **Download** → photos and videos land in
-`Download/X-media/<username>/` on your phone. Re-running only fetches new posts.
+`Download/X-media/<username>/` on your phone, and they show up in your Gallery. Re-running only fetches new posts.
 
 ## 1. Build the APK (free, no PC setup)
 
