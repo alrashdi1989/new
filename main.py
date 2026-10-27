@@ -97,6 +97,9 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, tiktok_
         "-d", out_dir,
         "--download-archive", os.path.join(out_dir, ".downloaded.sqlite3"),
         "-o", "videos=true",
+        # Android's shared storage rejects : ? * " < > | \ in file names
+        "-o", "path-restrict=windows",
+        "-o", "path-strip=windows",
         "-o", 'directory=["{section}"]' if site == "snapchat" else "directory=[]",
         "--filter", f"extension in {exts!r}",
     ]
@@ -602,152 +605,161 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "Save photos and videos from X, TikTok, Snapchat"
+                    text: "Save from X, TikTok and Snapchat"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
                     valign: "top"
                     text_size: self.size
 
-        GlassCard:
-            Caption:
-                text: "PROFILE OR POST LINK"
-            GlassInput:
-                id: url
-                hint_text: "X, TikTok or Snapchat link"
-            Caption:
-                text: "X ACCOUNT"
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(3)
+            bar_color: 1, 1, 1, .3
             BoxLayout:
+                orientation: "vertical"
                 size_hint_y: None
-                height: dp(50)
-                spacing: dp(8)
-                GlassInput:
-                    id: token
-                    hint_text: "auth_token"
-                    password: True
-                GhostButton:
-                    id: login_btn
-                    text: "Log in to X"
-                    size_hint_x: None
-                    width: dp(124)
-                    on_release: root.login("x")
-            Caption:
-                text: "TIKTOK ACCOUNT  (optional, for private accounts)"
-            BoxLayout:
-                size_hint_y: None
-                height: dp(50)
-                spacing: dp(8)
-                GlassInput:
-                    id: tt_state
-                    readonly: True
-                    hint_text: "Not signed in"
-                GhostButton:
-                    id: tt_btn
-                    text: "Log in"
-                    size_hint_x: None
-                    width: dp(124)
-                    on_release: root.login("tiktok")
-            Caption:
-                text: "SAVE TO"
-            BoxLayout:
-                size_hint_y: None
-                height: dp(50)
-                spacing: dp(8)
-                GlassInput:
-                    id: folder
-                    readonly: True
-                    hint_text: "Download/X-media"
-                GhostButton:
-                    text: "Change"
-                    size_hint_x: None
-                    width: dp(124)
-                    on_release: root.choose_folder()
-            Caption:
-                text: "INCLUDE"
-            BoxLayout:
-                size_hint_y: None
-                height: dp(40)
-                spacing: dp(8)
-                Chip:
-                    id: images
-                    text: "Photos"
-                    state: "down"
-                Chip:
-                    id: videos
-                    text: "Videos"
-                    state: "down"
-                Chip:
-                    id: retweets
-                    text: "X reposts"
-            Widget:
-                size_hint_y: None
-                height: dp(2)
-            PrimaryButton:
-                id: btn
-                text: "Stop" if root.busy else "Download"
-                size_hint_y: None
-                height: dp(56)
-                on_release: root.start()
-
-        GlassCard:
-            size_hint_y: 1
-            height: 0
-            spacing: dp(8)
-            BoxLayout:
-                size_hint_y: None
-                height: dp(24)
-                spacing: dp(10)
-                Widget:
-                    size_hint: None, None
-                    size: dp(10), dp(10)
-                    pos_hint: {"center_y": .5}
-                    canvas:
-                        Color:
-                            rgba: root.status_color
-                        Ellipse:
-                            pos: self.pos
-                            size: self.size
-                Label:
-                    id: status
-                    text: "Ready"
-                    font_size: "14sp"
-                    halign: "left"
-                    valign: "middle"
-                    text_size: self.size
-                    shorten: True
-                    shorten_from: "right"
-            Widget:
-                size_hint_y: None
-                height: dp(6) if root.progress >= 0 else 0
-                opacity: 1 if root.progress >= 0 else 0
-                canvas:
-                    Color:
-                        rgba: 1, 1, 1, .12
-                    RoundedRectangle:
-                        pos: self.pos
-                        size: self.size
-                        radius: [dp(3)]
-                    Color:
-                        rgba: .40, .85, 1, 1
-                    RoundedRectangle:
-                        pos: self.pos
-                        size: self.width * max(0, min(1, root.progress)), self.height
-                        radius: [dp(3)]
-            ScrollView:
-                id: scroll
-                bar_color: 1, 1, 1, .3
-                bar_width: dp(3)
-                Label:
-                    id: log
+                height: self.minimum_height
+                spacing: dp(16)
+                padding: [0, 0, 0, dp(8)]
+                GlassCard:
+                    Caption:
+                        text: "PROFILE OR POST LINK"
+                    GlassInput:
+                        id: url
+                        hint_text: "X, TikTok or Snapchat link"
+                    Caption:
+                        text: "X ACCOUNT"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        spacing: dp(8)
+                        GlassInput:
+                            id: token
+                            hint_text: "auth_token"
+                            password: True
+                        GhostButton:
+                            id: login_btn
+                            text: "Log in to X"
+                            size_hint_x: None
+                            width: dp(124)
+                            on_release: root.login("x")
+                    Caption:
+                        text: "TIKTOK ACCOUNT  (optional)"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        spacing: dp(8)
+                        GlassInput:
+                            id: tt_state
+                            readonly: True
+                            hint_text: "Not signed in"
+                        GhostButton:
+                            id: tt_btn
+                            text: "Log in"
+                            size_hint_x: None
+                            width: dp(124)
+                            on_release: root.login("tiktok")
+                    Caption:
+                        text: "SAVE TO"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        spacing: dp(8)
+                        GlassInput:
+                            id: folder
+                            readonly: True
+                            hint_text: "Download/X-media"
+                        GhostButton:
+                            text: "Change"
+                            size_hint_x: None
+                            width: dp(124)
+                            on_release: root.choose_folder()
+                    Caption:
+                        text: "INCLUDE"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(8)
+                        Chip:
+                            id: images
+                            text: "Photos"
+                            state: "down"
+                        Chip:
+                            id: videos
+                            text: "Videos"
+                            state: "down"
+                        Chip:
+                            id: retweets
+                            text: "X reposts"
+                    Widget:
+                        size_hint_y: None
+                        height: dp(2)
+                    PrimaryButton:
+                        id: btn
+                        text: "Stop" if root.busy else "Download"
+                        size_hint_y: None
+                        height: dp(56)
+                        on_release: root.start()
+                GlassCard:
                     size_hint_y: None
-                    height: max(self.texture_size[1], dp(10))
-                    text_size: self.width, None
-                    halign: "left"
-                    valign: "top"
-                    font_size: "12sp"
-                    font_name: "RobotoMono-Regular"
-                    color: 1, 1, 1, .72
-                    line_height: 1.15
+                    height: dp(300)
+                    spacing: dp(8)
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(24)
+                        spacing: dp(10)
+                        Widget:
+                            size_hint: None, None
+                            size: dp(10), dp(10)
+                            pos_hint: {"center_y": .5}
+                            canvas:
+                                Color:
+                                    rgba: root.status_color
+                                Ellipse:
+                                    pos: self.pos
+                                    size: self.size
+                        Label:
+                            id: status
+                            text: "Ready"
+                            font_size: "14sp"
+                            halign: "left"
+                            valign: "middle"
+                            text_size: self.size
+                            shorten: True
+                            shorten_from: "right"
+                    Widget:
+                        size_hint_y: None
+                        height: dp(6) if root.progress >= 0 else 0
+                        opacity: 1 if root.progress >= 0 else 0
+                        canvas:
+                            Color:
+                                rgba: 1, 1, 1, .12
+                            RoundedRectangle:
+                                pos: self.pos
+                                size: self.size
+                                radius: [dp(3)]
+                            Color:
+                                rgba: .40, .85, 1, 1
+                            RoundedRectangle:
+                                pos: self.pos
+                                size: self.width * max(0, min(1, root.progress)), self.height
+                                radius: [dp(3)]
+                    ScrollView:
+                        id: scroll
+                        bar_color: 1, 1, 1, .3
+                        bar_width: dp(3)
+                        Label:
+                            id: log
+                            size_hint_y: None
+                            height: max(self.texture_size[1], dp(10))
+                            text_size: self.width, None
+                            halign: "left"
+                            valign: "top"
+                            font_size: "12sp"
+                            font_name: "RobotoMono-Regular"
+                            color: 1, 1, 1, .72
+                            line_height: 1.15
 """
 
 
@@ -1044,6 +1056,8 @@ class Root(FloatLayout):
             self.status_color = OK if state == "done" else (IDLE if state == "cancelled" else ERR)
             if state == "done" and self.progress >= 0:
                 self.progress = 1
+            elif state != "done":
+                self.progress = -1
             self.busy = False
             if self._job_poll is not None:
                 self._job_poll.cancel()

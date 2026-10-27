@@ -49,6 +49,9 @@ class SnapchatFullExtractor(SnapchatExtractor):
                     continue
                 data["user"] = user
                 data["section"] = section
+                preview = (snap.get("snapUrls") or {}).get("mediaPreviewUrl")
+                if preview and preview != url:
+                    data["_fallback"] = (preview,)
                 data["_total"] = total
                 yield Message.Url, url, data
 

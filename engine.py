@@ -41,6 +41,27 @@ def request_cancel(status_dir):
         pass
 
 
+SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat"}
+
+
+def friendly_error(rc, site, detail=""):
+    name = SITE.get(site, "The site")
+    d = detail.lower()
+    if rc and rc & 16 or "401" in d or "login" in d or "auth" in d:
+        return f"{name} needs you to be logged in."
+    if "404" in d or "not found" in d or "does not exist" in d or "suspended" in d:
+        return "Profile or post not found (check the link)."
+    if "429" in d or "rate limit" in d:
+        return f"{name} is limiting requests. Try again in 15 minutes."
+    if "403" in d or (rc and rc & 8):
+        return f"{name} blocked the request. Try again later."
+    if "private" in d or "protected" in d:
+        return "This account is private."
+    if rc and rc & 4:
+        return f"{name} refused the request or the content is unavailable."
+    return f"Something went wrong (code {rc})."
+
+
 class _LineWriter(io.TextIOBase):
     def __init__(self, callback):
         self.cb, self.buf = callback, ""
@@ -67,6 +88,7 @@ class Job:
         self.count = 0
         self.new_files = []
         self.total = 0
+        self.last_error = ""
         self.posts = set()
         self.state = {"state": "running", "count": 0, "site": spec["site"],
                       "user": spec["user"], "out": spec["out"],
@@ -130,6 +152,8 @@ class Job:
                 self.notify(f"@{self.spec['user']}: {self.progress_text()}")
         else:
             self.log(line)
+            if "][error]" in line or "][warning]" in line:
+                self.last_error = line.split("] ", 1)[-1].strip()
             low = line.lower()
             if self.spec["site"] == "x" and (
                     "401" in low or "login" in low or "authenticat" in low):
@@ -196,7 +220,9 @@ class Job:
             self.log(f"Gallery scan issue: {e}")
 
         text = {"done": "Finished.", "cancelled": "Stopped.",
-                "error": f"Finished with errors (code {rc})."}[result]
+                "error": "Problem: " + friendly_error(rc, self.spec["site"], self.last_error)}[result]
+        if result == "error" and self.last_error:
+            self.log("Reason: " + self.last_error)
         self.log(f"Saved in: {self.spec.get('out_label', self.spec['out'])}")
         self.save(state=result, count=self.count, total=self.total, seen=len(self.posts),
                   status=f"{text} {self.count} new files")
