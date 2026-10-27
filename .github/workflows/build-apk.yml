@@ -43,12 +43,19 @@ jobs:
       - name: Build debug APK
         run: yes | buildozer -v android debug
 
-      - name: Show signing certificate
+      - name: Sign with the app's permanent key (so updates install over the old version)
         run: |
-          SIGNER=$(find ~/.buildozer -name apksigner -type f | head -1)
-          "$SIGNER" verify --print-certs bin/*.apk | grep -i "SHA-256"
+          BT=$(dirname "$(find ~/.buildozer -name apksigner -type f | sort | tail -1)")
+          APK=$(ls bin/*.apk | head -1)
+          mkdir -p out
+          "$BT/zipalign" -f -p 4 "$APK" out/aligned.apk
+          "$BT/apksigner" sign --ks debug.keystore --ks-pass pass:android \
+            --ks-key-alias androiddebugkey --key-pass pass:android \
+            --out "out/MediaDownloader.apk" out/aligned.apk
+          rm out/aligned.apk
+          "$BT/apksigner" verify --print-certs out/MediaDownloader.apk | grep -i "SHA-256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: x-media-downloader-apk
-          path: bin/*.apk
+          path: out/MediaDownloader.apk
