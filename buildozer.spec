@@ -12,8 +12,10 @@ fullscreen = 0
 android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE
 android.api = 34
 android.minapi = 24
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
+android.ndk = 25b
 android.accept_sdk_license = True
+p4a.branch = v2024.01.21
 android.allow_backup = True
 
 [buildozer]
