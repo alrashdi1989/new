@@ -1,4 +1,4 @@
-# X Media Downloader (Android)
+# Media Downloader for X and TikTok (Android)
 
 Paste a public X profile URL → tap **Download** → photos and videos land in
 `Download/X-media/<username>/` on your phone, and they show up in your Gallery. Re-running only fetches new posts.
@@ -48,3 +48,12 @@ gallery-dl -o 'cookies={"auth_token":"PASTE_TOKEN"}' -d ~/storage/downloads/X-me
 On first launch the app asks for file access (Android: "Allow access to manage
 all files"). Tap **Change** under *Save to* to pick any folder; each profile gets
 its own subfolder there, and files show up in Gallery / Google Photos.
+
+## TikTok and background downloads
+
+Paste any TikTok profile (`tiktok.com/@user`), video, photo post or short share
+link (`vm.tiktok.com/...`). No TikTok login is needed for public accounts.
+TikTok files go to `<Save to>/TikTok/<user>/`.
+
+Downloads run in a background service with a notification, so you can leave
+the app or lock the phone. Tap **Stop** in the app to cancel.

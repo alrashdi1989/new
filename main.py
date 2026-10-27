@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import threading
+import time
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -17,13 +18,15 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.storage.jsonstore import JsonStore
 from kivy.lang import Builder
-from kivy.properties import ListProperty
+from kivy.properties import BooleanProperty, ListProperty
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.textinput import TextInput
 from kivy.uix.togglebutton import ToggleButton
 from kivy.utils import platform
+
+import engine
 
 RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "settings",
             "compose", "login", "logout", "signup", "tos", "privacy", "hashtag", "intent"}
@@ -32,6 +35,7 @@ VIDEO_EXT = ("mp4", "mov", "m4v", "webm")
 
 
 def parse_username(text):
+    """X username from a profile link, @name or bare name (kept for compatibility)."""
     text = text.strip()
     m = re.match(r"^(?:https?://)?(?:www\.|mobile\.)?(?:x|twitter)\.com/([^/?#]+)", text, re.I)
     name = m.group(1) if m else text.lstrip("@")
@@ -40,20 +44,66 @@ def parse_username(text):
     return None
 
 
-def build_args(user, out_dir, auth_token, images, videos, retweets):
+def resolve_link(text):
+    """Return (site, name, url) for an X or TikTok link, or None.
+
+    site is "x" or "tiktok"; name is used for the folder and status text.
+    """
+    t = text.strip().split()[0] if text.strip() else ""
+    if not t:
+        return None
+    if not re.match(r"^https?://", t, re.I) and ("." in t.split("/")[0]):
+        t = "https://" + t
+
+    # TikTok short share links (vm./vt.tiktok.com/xxxx, tiktok.com/t/xxxx)
+    m = re.match(r"^https?://(?:vm|vt)\.tiktok\.com/(\w+)", t, re.I) or \
+        re.match(r"^https?://(?:www\.|m\.)?tiktok\.com/t/(\w+)", t, re.I)
+    if m:
+        return "tiktok", "shared", t.split("?")[0]
+    # TikTok single post
+    m = re.match(r"^https?://(?:www\.|m\.)?tiktok\.com/@([\w.-]+)/(?:video|photo)/(\d+)", t, re.I)
+    if m:
+        return "tiktok", m.group(1), f"https://www.tiktok.com/@{m.group(1)}/video/{m.group(2)}"
+    # TikTok profile
+    m = re.match(r"^https?://(?:www\.|m\.)?tiktok\.com/@([\w.-]+)/?(?:[?#].*)?$", t, re.I)
+    if m:
+        return "tiktok", m.group(1), f"https://www.tiktok.com/@{m.group(1)}/posts"
+
+    # X single post
+    m = re.match(r"^https?://(?:www\.|mobile\.)?(?:x|twitter)\.com/(\w{1,15})/status/(\d+)", t, re.I)
+    if m:
+        return "x", m.group(1), f"https://x.com/{m.group(1)}/status/{m.group(2)}"
+    # X profile, @name or bare name
+    user = parse_username(text)
+    if user:
+        return "x", user, f"https://x.com/{user}/media"
+    return None
+
+
+def build_args(site, url, out_dir, auth_token, images, videos, retweets):
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     args = [
         "-d", out_dir,
         "--download-archive", os.path.join(out_dir, ".downloaded.sqlite3"),
-        "-o", f"retweets={'true' if retweets else 'false'}",
         "-o", "videos=true",
         "-o", "directory=[]",
         "--filter", f"extension in {exts!r}",
     ]
-    if auth_token:
-        args += ["-o", 'cookies={"auth_token": "%s"}' % auth_token.strip()]
-    args.append(f"https://x.com/{user}/media")
+    if site == "x":
+        args += ["-o", f"retweets={'true' if retweets else 'false'}"]
+        if auth_token:  # the X login is only ever sent to X
+            args += ["-o", 'cookies={"auth_token": "%s"}' % auth_token.strip()]
+    else:
+        args += ["-o", "audio=false", "-o", "covers=false"]
+    args.append(url)
     return args
+
+
+def output_dir(save_dir, site, name):
+    # X keeps its original layout so earlier downloads aren't repeated.
+    if site == "x":
+        return os.path.join(save_dir, name)
+    return os.path.join(save_dir, "TikTok", name)
 
 
 def download_root():
@@ -169,6 +219,20 @@ def media_scan_folder(root):
                 found.append(os.path.join(dirpath, f))
     media_scan(found)
     return len(found)
+
+
+def start_service(spec):
+    from jnius import autoclass  # type: ignore
+    import json
+    act = autoclass("org.kivy.android.PythonActivity").mActivity
+    svc = autoclass("org.personal.xmediadownloader.ServiceDownloader")
+    svc.start(act, json.dumps(spec))
+
+
+def request_notifications():
+    if platform == "android" and sdk_int() >= 33:
+        from android.permissions import request_permissions  # type: ignore
+        request_permissions(["android.permission.POST_NOTIFICATIONS"])
 
 
 # ---------- Android WebView login helpers ----------
@@ -525,7 +589,7 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "Save photos and videos from X profiles"
+                    text: "Save photos and videos from X and TikTok"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
@@ -534,12 +598,12 @@ KV = """
 
         GlassCard:
             Caption:
-                text: "PROFILE"
+                text: "PROFILE OR POST LINK"
             GlassInput:
                 id: url
-                hint_text: "https://x.com/username"
+                hint_text: "x.com/user  or  tiktok.com/@user"
             Caption:
-                text: "ACCOUNT"
+                text: "X ACCOUNT  (not needed for TikTok)"
             BoxLayout:
                 size_hint_y: None
                 height: dp(50)
@@ -585,13 +649,13 @@ KV = """
                     state: "down"
                 Chip:
                     id: retweets
-                    text: "Reposts"
+                    text: "X reposts"
             Widget:
                 size_hint_y: None
                 height: dp(2)
             PrimaryButton:
                 id: btn
-                text: "Downloading..." if self.disabled else "Download"
+                text: "Stop" if root.busy else "Download"
                 size_hint_y: None
                 height: dp(56)
                 on_release: root.start()
@@ -672,6 +736,7 @@ IDLE, BUSY, OK, ERR = (1, 1, 1, .4), (.40, .85, 1, 1), (.30, .86, .64, 1), (.98,
 
 class Root(FloatLayout):
     status_color = ListProperty(IDLE)
+    busy = BooleanProperty(False)
 
     def __init__(self, store, **kw):
         super().__init__(**kw)
@@ -688,7 +753,8 @@ class Root(FloatLayout):
             self.login_btn.text = "Signed in"
         self._login_active = False
         self._login_done = threading.Event()
-        self._new_files = []
+        self._job_poll = None
+        self._log_pos = 0
         self.save_dir = store.get("folder")["path"] if store.exists("folder") else download_root()
         self.ids.folder.text = pretty_path(self.save_dir)
         # Make files from earlier downloads visible in Gallery.
@@ -808,14 +874,22 @@ class Root(FloatLayout):
             return True
         return False
 
+    # ---- downloading (runs in a background service on Android) ----
+    @property
+    def status_dir(self):
+        return os.path.join(App.get_running_app().user_data_dir, "job")
+
     def start(self):
-        if self.running:
+        if self.busy:
+            engine.request_cancel(self.status_dir)
+            self.set_status("Stopping…")
             return
-        user = parse_username(self.url.text)
-        if not user:
-            self.set_status("Invalid profile URL.")
+        link = resolve_link(self.url.text)
+        if not link:
+            self.set_status("Paste an X or TikTok link.")
             self.set_state(ERR)
             return
+        site, user, gurl = link
         if not (self.images.active or self.videos.active):
             self.set_status("Pick Photos and/or Videos.")
             self.set_state(ERR)
@@ -826,74 +900,79 @@ class Root(FloatLayout):
         if not self.ensure_access():
             self.set_status("Allow file access, then tap Download again.")
             return
-        out = os.path.join(self.save_dir, user)
+        out = output_dir(self.save_dir, site, user)
         os.makedirs(out, exist_ok=True)
+        spec = {
+            "args": build_args(site, gurl, out, token, self.images.active,
+                               self.videos.active, self.retweets.active),
+            "out": out, "out_label": pretty_path(out), "site": site, "user": user,
+            "status_dir": self.status_dir,
+        }
+        os.makedirs(self.status_dir, exist_ok=True)
+        for f in engine.paths(self.status_dir):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
 
         self.log.text = ""
-        self.count = 0
-        self._new_files = []
-        self.running = True
-        self.btn.disabled = True
-        self.set_status(f"Downloading @{user}…")
+        self._log_pos = 0
+        self.busy = True
+        self.set_status(f"Downloading {'TikTok' if site == 'tiktok' else 'X'} @{user}…")
         self.set_state(BUSY)
-        args = build_args(user, out, token, self.images.active, self.videos.active, self.retweets.active)
-        threading.Thread(target=self.run, args=(args, out), daemon=True).start()
-
-    def _flush_scan(self):
-        batch, self._new_files = self._new_files, []
-        try:
-            media_scan(batch)
-        except Exception as e:
-            self.write(f"Gallery scan issue: {e}")
-
-    def on_line(self, line):
-        if line.startswith("#"):
-            self.write("skip " + os.path.basename(line[1:].strip()))
-        elif not line.startswith("[") and os.sep in line:
-            self.count += 1
-            self._new_files.append(line.strip())
-            if len(self._new_files) >= 25:
-                self._flush_scan()
-            self.write("+ " + os.path.basename(line))
-            self.set_status(f"{self.count} files downloaded…")
+        if platform == "android":
+            try:
+                start_service(spec)
+            except Exception as e:
+                self.write(f"Background mode unavailable ({e}); downloading in the app.")
+                threading.Thread(target=lambda: engine.Job(spec, scan=media_scan).run(),
+                                 daemon=True).start()
         else:
-            self.write(line)
-            low = line.lower()
-            if "401" in low or "login" in low or "authenticat" in low:
-                self.write("→ Paste a valid auth_token cookie (see README).")
+            threading.Thread(target=lambda: engine.Job(spec).run(), daemon=True).start()
+        self._watch_job()
 
-    def run(self, args, out):
-        import logging
-        import gallery_dl
-        writer = LineWriter(self.on_line)
-        old_out, old_err, old_argv = sys.stdout, sys.stderr, sys.argv
-        logging.getLogger().handlers.clear()
-        gallery_dl.config.clear()
-        sys.stdout = sys.stderr = writer
-        sys.argv = ["gallery-dl"] + args
-        rc = 1
+    def _watch_job(self):
+        if self._job_poll is None:
+            self._job_poll = Clock.schedule_interval(self._poll_job, 0.5)
+
+    def resume_job(self):
+        if self._job_poll is not None:
+            return
+        st = engine.read_status(self.status_dir)
+        if st and st.get("state") == "running" and time.time() - st.get("beat", 0) < 45:
+            self.busy = True
+            self.set_state(BUSY)
+            self._log_pos = 0
+            self.log.text = ""
+            self._watch_job()
+
+    def _poll_job(self, *_):
+        st = engine.read_status(self.status_dir)
+        _, log_path, _ = engine.paths(self.status_dir)
         try:
-            self.write("Fetching media list…")
-            rc = gallery_dl.main() or 0
-        except SystemExit as e:
-            rc = e.code or 0
-        except Exception as e:
-            self.write(f"Error: {e}")
-        finally:
-            sys.stdout, sys.stderr, sys.argv = old_out, old_err, old_argv
-        self._flush_scan()
-        try:
-            media_scan_folder(out)  # also catches files from older versions
-        except Exception as e:
-            self.write(f"Gallery scan issue: {e}")
-        msg = "Finished." if rc == 0 else f"Finished with errors (code {rc})."
-        self.set_state(OK if rc == 0 else ERR)
-        self.set_status(f"{msg} {self.count} new files")
-        self.write(f"Saved in: {pretty_path(out)}")
-        def _done(*_):
-            self.running = False
-            self.btn.disabled = False
-        Clock.schedule_once(_done)
+            with open(log_path, encoding="utf-8") as f:
+                f.seek(self._log_pos)
+                chunk = f.read()
+                self._log_pos = f.tell()
+            if chunk:
+                lines = (self.log.text + chunk).splitlines()[-60:]
+                self.log.text = "\n".join(lines) + "\n"
+                self.scroll.scroll_y = 0
+        except OSError:
+            pass
+        if not st:
+            return
+        self.status.text = st.get("status", "")
+        state = st.get("state")
+        stale = state == "running" and time.time() - st.get("beat", 0) > 45
+        if state != "running" or stale:
+            if stale:
+                self.status.text = "Download stopped unexpectedly. Tap Download to continue."
+            self.status_color = OK if state == "done" else (IDLE if state == "cancelled" else ERR)
+            self.busy = False
+            if self._job_poll is not None:
+                self._job_poll.cancel()
+                self._job_poll = None
 
 
 class XMediaApp(App):
@@ -905,6 +984,8 @@ class XMediaApp(App):
         self.root_widget = Root(JsonStore(os.path.join(self.user_data_dir, "settings.json")))
         if platform == "android":
             Clock.schedule_once(lambda *_: self.root_widget.ensure_access(), 1)
+            Clock.schedule_once(lambda *_: request_notifications(), 2)
+        Clock.schedule_once(lambda *_: self.root_widget.resume_job(), 0.5)
         Window.bind(on_keyboard=self._on_key)
         return self.root_widget
 
@@ -912,6 +993,7 @@ class XMediaApp(App):
         return True  # keep running while the folder picker or Settings is open
 
     def on_resume(self):
+        self.root_widget.resume_job()
         if has_file_access():
             self.root_widget.set_status("File access allowed.")
             self.root_widget.set_state(OK)
