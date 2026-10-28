@@ -114,10 +114,10 @@ def finish():
         pass
 
 
-if spec.get("args"):
+if spec.get("args") or spec.get("jobs"):
     threading.Thread(target=cancel_watch, daemon=True).start()
     try:
-        engine.Job(spec, scan=scan, notify=notify).run()
+        engine.run_queue(spec, scan=scan, notify=notify)
     finally:
         finish()
 else:

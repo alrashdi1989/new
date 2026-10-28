@@ -110,6 +110,28 @@ def resolve_link(text):
     return None
 
 
+def parse_links(text):
+    """Return ([(site, name, url), ...], bad_tokens) from text with one or more links."""
+    tokens = [t.strip("<>()[]\"'.,;") for t in re.split(r"[\s,]+", text or "")]
+    tokens = [t for t in tokens if t]
+    many = len(tokens) > 1
+    found, seen, bad = [], set(), []
+    for t in tokens:
+        # In a list or share text, only accept things that look like links,
+        # so ordinary words aren't mistaken for X usernames.
+        if many and not ("." in t or "/" in t or t.startswith("@")):
+            continue
+        link = resolve_link(t)
+        if not link:
+            if "." in t or "/" in t:
+                bad.append(t)
+            continue
+        if link[2] not in seen:
+            seen.add(link[2])
+            found.append(link)
+    return found, bad
+
+
 def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_cookies=None):
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     args = [
@@ -498,7 +520,7 @@ KV = """
     size_hint_y: None
     height: dp(50)
     font_size: "15sp"
-    padding: [dp(16), (self.height - self.line_height) / 2]
+    padding: [dp(16), dp(14), dp(16), dp(14)] if self.multiline else [dp(16), (self.height - self.line_height) / 2]
 
 <Chip>:
     background_normal: ""
@@ -658,19 +680,28 @@ KV = """
                 padding: [0, 0, 0, dp(8)]
                 GlassCard:
                     Caption:
-                        text: "PROFILE OR POST LINK"
+                        text: "LINKS  (one per line)"
+                    GlassInput:
+                        id: url
+                        multiline: True
+                        hint_text: "Paste one or more profile or post links"
+                        height: min(max(dp(50), self.minimum_height), dp(170))
+                        on_text: root.update_link_count()
                     BoxLayout:
                         size_hint_y: None
-                        height: dp(50)
+                        height: dp(42)
                         spacing: dp(8)
-                        GlassInput:
-                            id: url
-                            hint_text: "Paste a profile or post link"
                         GhostButton:
-                            text: "Clear" if url.text else "Paste"
-                            size_hint_x: None
-                            width: dp(96)
-                            on_release: root.paste_or_clear()
+                            text: "+ Paste"
+                            on_release: root.paste_link()
+                        GhostButton:
+                            text: "Clear"
+                            on_release: root.clear_links()
+                        Label:
+                            text: ("%d links" % root.link_count) if root.link_count != 1 else "1 link"
+                            font_size: "13sp"
+                            color: 1, 1, 1, .6
+                            size_hint_x: .8
                     Caption:
                         text: "X ACCOUNT"
                     BoxLayout:
@@ -756,7 +787,7 @@ KV = """
                         height: dp(2)
                     PrimaryButton:
                         id: btn
-                        text: "Stop" if root.busy else "Download"
+                        text: "Stop" if root.busy else ("Download %d links" % root.link_count if root.link_count > 1 else "Download")
                         size_hint_y: None
                         height: dp(56)
                         on_release: root.start()
@@ -858,6 +889,7 @@ class Root(FloatLayout):
     status_color = ListProperty(IDLE)
     busy = BooleanProperty(False)
     progress = NumericProperty(-1)
+    link_count = NumericProperty(0)
 
     def __init__(self, store, **kw):
         super().__init__(**kw)
@@ -896,21 +928,36 @@ class Root(FloatLayout):
             self.write(f"Gallery scan issue: {e}")
 
     # ---- link box ----
-    def paste_or_clear(self):
-        if self.url.text:
-            self.url.text = ""
-            self.url.focus = True
-            return
+    def paste_link(self):
         try:
             from kivy.core.clipboard import Clipboard
-            text = (Clipboard.paste() or "").strip()
+            clip = (Clipboard.paste() or "").strip()
         except Exception:
-            text = ""
-        if text:
-            self.url.text = text
-            self.url.cursor = (0, 0)
-        else:
+            clip = ""
+        if not clip:
             self.set_status("Clipboard is empty. Copy a link first.")
+            return
+        new, _ = parse_links(clip)
+        have = {l[2] for l in parse_links(self.url.text)[0]}
+        if new and all(l[2] in have for l in new):
+            self.set_status("That link is already in the list.")
+            return
+        self.url.text = (self.url.text.rstrip() + "\n" + clip) if self.url.text.strip() else clip
+        self.url.cursor = (0, len(self.url._lines) - 1)
+
+    def update_link_count(self):
+        self.link_count = len(parse_links(self.url.text)[0])
+
+    def clear_links(self):
+        self.url.text = ""
+        self.url.focus = True
+
+    # kept for older callers
+    def paste_or_clear(self):
+        if self.url.text:
+            self.clear_links()
+        else:
+            self.paste_link()
 
     # ---- save location ----
     def ensure_access(self):
@@ -1048,12 +1095,11 @@ class Root(FloatLayout):
             engine.request_cancel(self.status_dir)
             self.set_status("Stopping…")
             return
-        link = resolve_link(self.url.text)
-        if not link:
+        links, bad = parse_links(self.url.text)
+        if not links:
             self.set_status("Paste an X, TikTok, Snapchat or Instagram link.")
             self.set_state(ERR)
             return
-        site, user, gurl = link
         if not (self.images.active or self.videos.active):
             self.set_status("Pick Photos and/or Videos.")
             self.set_state(ERR)
@@ -1061,23 +1107,27 @@ class Root(FloatLayout):
         token = self.token.text.strip()
         if token:
             self.store.put("auth", token=token)
-        if site == "instagram" and not self.store.exists("instagram"):
+        if any(l[0] == "instagram" for l in links) and not self.store.exists("instagram"):
             self.set_status("Log in to Instagram first (Instagram account → Log in).")
             self.set_state(ERR)
             return
         if not self.ensure_access():
             self.set_status("Allow file access, then tap Download again.")
             return
-        out = output_dir(self.save_dir, site, user)
-        os.makedirs(out, exist_ok=True)
-        spec = {
-            "args": build_args(site, gurl, out, token, self.images.active,
-                               self.videos.active, self.retweets.active,
-                               self.store.get(site)["cookies"]
-                               if site in ROW_IDS and self.store.exists(site) else None),
-            "out": out, "out_label": pretty_path(out), "site": site, "user": user,
-            "status_dir": self.status_dir,
-        }
+        jobs = []
+        for site, user, gurl in links:
+            out = output_dir(self.save_dir, site, user)
+            os.makedirs(out, exist_ok=True)
+            jobs.append({
+                "args": build_args(site, gurl, out, token, self.images.active,
+                                   self.videos.active, self.retweets.active,
+                                   self.store.get(site)["cookies"]
+                                   if site in ROW_IDS and self.store.exists(site) else None),
+                "out": out, "out_label": pretty_path(out), "site": site, "user": user,
+                "status_dir": self.status_dir,
+            })
+        spec = {"jobs": jobs, "status_dir": self.status_dir}
+        site, user = links[0][0], links[0][1]
         os.makedirs(self.status_dir, exist_ok=True)
         for f in engine.paths(self.status_dir):
             try:
@@ -1089,17 +1139,20 @@ class Root(FloatLayout):
         self._log_pos = 0
         self.progress = -1
         self.busy = True
-        self.set_status(f"Downloading {SITE_NAMES[site]} @{user}…")
+        self.set_status(f"Downloading {SITE_NAMES[site]} @{user}…" if len(jobs) == 1
+                        else f"Downloading {len(jobs)} links…")
         self.set_state(BUSY)
+        if bad:
+            self.write("Skipped (not a supported link): " + ", ".join(bad[:5]))
         if platform == "android":
             try:
                 start_service(spec)
             except Exception as e:
                 self.write(f"Background mode unavailable ({e}); downloading in the app.")
-                threading.Thread(target=lambda: engine.Job(spec, scan=media_scan).run(),
+                threading.Thread(target=lambda: engine.run_queue(spec, scan=media_scan),
                                  daemon=True).start()
         else:
-            threading.Thread(target=lambda: engine.Job(spec).run(), daemon=True).start()
+            threading.Thread(target=lambda: engine.run_queue(spec), daemon=True).start()
         self._watch_job()
 
     def _watch_job(self):

@@ -79,8 +79,10 @@ class _LineWriter(io.TextIOBase):
 
 
 class Job:
-    def __init__(self, spec, scan=None, notify=None):
+    def __init__(self, spec, scan=None, notify=None, pos=(1, 1)):
         self.spec = spec
+        self.pos = pos
+        self.prefix = f"[{pos[0]}/{pos[1]}] " if pos[1] > 1 else ""
         self.scan = scan or (lambda paths: None)
         self.notify = notify or (lambda text, done=False: None)
         os.makedirs(spec["status_dir"], exist_ok=True)
@@ -116,6 +118,9 @@ class Job:
 
     # ---- gallery-dl output ----
     def progress_text(self):
+        return self.prefix + self._progress_text()
+
+    def _progress_text(self):
         seen = len(self.posts)
         if self.total and seen <= self.total:
             return f"{self.count} new · post {seen} of ~{self.total} · ≈{self.total - seen} left"
@@ -149,7 +154,7 @@ class Job:
                       status=self.progress_text())
             if time.time() - self._last_notify > 2:
                 self._last_notify = time.time()
-                self.notify(f"@{self.spec['user']}: {self.progress_text()}")
+                self.notify(f"{self.prefix}@{self.spec['user']}: {self._progress_text()}")
         else:
             self.log(line)
             if "][error]" in line or "][warning]" in line:
@@ -168,20 +173,21 @@ class Job:
                 self.log(f"Gallery scan issue: {e}")
 
     def _heartbeat(self):
-        while self.state["state"] == "running":
+        while self.state["state"] == "running" and not getattr(self, "result", None):
             time.sleep(3)
-            if self.state["state"] == "running":
+            if self.state["state"] == "running" and not getattr(self, "result", None):
                 self.save()
 
     # ---- run ----
-    def run(self):
-        try:
-            os.remove(self.cancel_path)
-        except OSError:
-            pass
-        open(self.log_path, "w").close()
-        self.save()
-        self.notify(f"Downloading @{self.spec['user']}…")
+    def run(self, final=True):
+        first, n = self.pos[0] == 1, self.pos[1]
+        if first:
+            open(self.log_path, "w").close()
+        if n > 1:
+            self.log(("" if first else "\n") + f"── {self.prefix}{SITE.get(self.spec['site'], '')} @{self.spec['user']} ──")
+        self.save(state="running", count=0, total=0, seen=0,
+                  status=f"{self.prefix}Starting @{self.spec['user']}…")
+        self.notify(f"{self.prefix}Downloading @{self.spec['user']}…")
         threading.Thread(target=self._heartbeat, daemon=True).start()
         self.log("Fetching media list…")
 
@@ -224,7 +230,45 @@ class Job:
         if result == "error" and self.last_error:
             self.log("Reason: " + self.last_error)
         self.log(f"Saved in: {self.spec.get('out_label', self.spec['out'])}")
-        self.save(state=result, count=self.count, total=self.total, seen=len(self.posts),
-                  status=f"{text} {self.count} new files")
-        self.notify(f"{text} {self.count} new files from @{self.spec['user']}", done=True)
+        self.result, self.result_text = result, text
+        if final:
+            self.save(state=result, count=self.count, total=self.total, seen=len(self.posts),
+                      status=f"{text} {self.count} new files")
+            self.notify(f"{text} {self.count} new files from @{self.spec['user']}", done=True)
         return result
+
+
+def run_queue(queue, scan=None, notify=None):
+    """Download several links one after another.
+
+    queue = {"jobs": [spec, ...]}  (a single spec dict is also accepted)
+    Returns the overall result: "done", "error" or "cancelled".
+    """
+    jobs = queue.get("jobs") or [queue]
+    n = len(jobs)
+    if n == 1:
+        return Job(jobs[0], scan=scan, notify=notify).run()
+
+    results, total_new, last = [], 0, None
+    for i, spec in enumerate(jobs, 1):
+        last = Job(spec, scan=scan, notify=notify, pos=(i, n))
+        if last.cancelled():
+            break
+        r = last.run(final=False)
+        results.append(r)
+        total_new += last.count
+        if r == "cancelled":
+            break
+
+    problems = results.count("error")
+    if "cancelled" in results or len(results) < n:
+        state, head = "cancelled", f"Stopped after {len(results)} of {n} links."
+    elif problems:
+        state, head = "error", f"Finished {n} links, {problems} with problems."
+    else:
+        state, head = "done", f"Finished all {n} links."
+    status = f"{head} {total_new} new files"
+    last.log("\n" + status)
+    last.save(state=state, count=total_new, total=0, seen=0, status=status)
+    last.notify(status, done=True)
+    return state

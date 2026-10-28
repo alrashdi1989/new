@@ -73,3 +73,10 @@ Paste a profile link to download Stories, Highlights and Posts (incl. reels)
 into `Instagram/<user>/Stories|Highlights|Posts/`, or paste a single post,
 reel, story or highlight link. Instagram is slow on purpose (6–12 s between
 requests) to avoid account restrictions; consider using a spare account.
+
+## Several links at once
+
+Paste several links into the box (one per line, or tap **+ Paste** after
+copying each one). Tap **Download N links**: they download one after another
+in the background, each into its own folder. One failing link doesn't stop the
+rest, and **Stop** cancels the remaining ones.
