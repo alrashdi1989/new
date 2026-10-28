@@ -157,7 +157,8 @@ def parse_links(text):
     return found, bad
 
 
-def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_cookies=None):
+def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_cookies=None,
+               site_ua=None):
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     args = [
         "-d", out_dir,
@@ -179,14 +180,20 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
         args += ["-o", "audio=false", "-o", "covers=false"]
         if site_cookies:  # the TikTok login is only ever sent to TikTok
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
+            if site_ua:  # same browser identity the login was made with
+                args += ["-o", "user-agent=" + site_ua]
     elif site == "facebook":
         if site_cookies:  # the Facebook login is only ever sent to Facebook
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
+            if site_ua:  # same browser identity the login was made with
+                args += ["-o", "user-agent=" + site_ua]
     elif site == "instagram":
         if is_ig_profile(url):
             args += ["-o", "include=stories,highlights,posts"]
         if site_cookies:  # the Instagram login is only ever sent to Instagram
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
+            if site_ua:  # same browser identity the login was made with
+                args += ["-o", "user-agent=" + site_ua]
     # Report each post's id plus the profile's post count, so the app can show
     # "post N of ~total" (only meaningful for whole profiles).
     if site == "x" and url.endswith("/media"):
@@ -348,6 +355,21 @@ def request_notifications():
 
 
 # ---------- Android WebView login helpers ----------
+WEBVIEW_UA = [""]   # browser identity used for in-app logins
+
+
+def login_ua():
+    """The in-app browser's identity (also for logins saved by older versions)."""
+    if WEBVIEW_UA[0] or platform != "android":
+        return WEBVIEW_UA[0]
+    try:
+        from jnius import autoclass  # type: ignore
+        act = autoclass("org.kivy.android.PythonActivity").mActivity
+        ua = autoclass("android.webkit.WebSettings").getDefaultUserAgent(act)
+        WEBVIEW_UA[0] = ua.replace("; wv", "")
+    except Exception:
+        pass
+    return WEBVIEW_UA[0]
 _container = None
 _webview = None
 _click_ref = None
@@ -391,6 +413,7 @@ if platform == "android":
         st.setJavaScriptEnabled(True)
         st.setDomStorageEnabled(True)
         st.setUserAgentString(st.getUserAgentString().replace("; wv", ""))
+        WEBVIEW_UA[0] = st.getUserAgentString()
         cm.setAcceptThirdPartyCookies(wv, True)
         wv.setWebViewClient(_WebViewClient())
         return wv
@@ -844,12 +867,12 @@ KV = """
                     spacing: dp(8)
                     BoxLayout:
                         size_hint_y: None
-                        height: dp(24)
+                        height: max(dp(24), status.texture_size[1])
                         spacing: dp(10)
                         Widget:
                             size_hint: None, None
                             size: dp(10), dp(10)
-                            pos_hint: {"center_y": .5}
+                            pos_hint: {"top": 1} if status.texture_size[1] > dp(30) else {"center_y": .5}
                             canvas:
                                 Color:
                                     rgba: root.status_color
@@ -861,10 +884,9 @@ KV = """
                             text: "Ready"
                             font_size: "14sp"
                             halign: "left"
-                            valign: "middle"
-                            text_size: self.size
-                            shorten: True
-                            shorten_from: "right"
+                            valign: "top"
+                            text_size: self.width, None
+                            max_lines: 3
                     Widget:
                         size_hint_y: None
                         height: dp(6) if root.progress >= 0 else 0
@@ -1121,7 +1143,7 @@ class Root(FloatLayout):
                 self.token.text = token
                 self.login_btn.text = "Signed in"
         else:
-            self.store.put(site, cookies=jar)
+            self.store.put(site, cookies=jar, ua=WEBVIEW_UA[0])
             state_id, btn_id = ROW_IDS[site]
             def _ok(*_):
                 self.ids[state_id].text = "Signed in"
@@ -1173,6 +1195,8 @@ class Root(FloatLayout):
                 "args": build_args(site, gurl, out, token, self.images.active,
                                    self.videos.active, self.retweets.active,
                                    self.store.get(site)["cookies"]
+                                   if site in ROW_IDS and self.store.exists(site) else None,
+                                   (self.store.get(site).get("ua") or login_ua())
                                    if site in ROW_IDS and self.store.exists(site) else None),
                 "out": out, "out_label": pretty_path(out), "site": site, "user": user,
                 "status_dir": self.status_dir,

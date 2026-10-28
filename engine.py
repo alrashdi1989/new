@@ -74,6 +74,9 @@ def friendly_error(rc, site, detail=""):
     if site == "facebook" and ("unsupported url" in d or "no suitable extractor" in d):
         return ("This kind of Facebook link isn't supported. Use a profile/page, photo, "
                 "album, video or reel link.")
+    if site == "tiktok" and ("403" in d or "captcha" in d or "verify" in d or (rc and rc & 8)):
+        return ("TikTok blocked the request. Log in to TikTok in the app "
+                "(or wait a few hours), then try again.")
     if rc and rc & 16 or "401" in d or "login" in d or "auth" in d:
         return f"{name} needs you to be logged in."
     if "404" in d or "not found" in d or "does not exist" in d or "suspended" in d:
