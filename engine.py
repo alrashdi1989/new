@@ -57,7 +57,10 @@ def normalize_facebook_url(final):
     parts = urlsplit(final)
     path = parts.path.rstrip("/")
     if re.search(r"/(photo|photo\.php|media/set)", path):
-        return final
+        album = parse_qs(parts.query).get("set", [""])[0]
+        if album:
+            return f"https://www.facebook.com/media/set/?set={album}"
+        return final.replace("facebook.com/photo.php?", "facebook.com/photo/?")
     if path.endswith("profile.php"):
         pid = parse_qs(parts.query).get("id", [""])[0]
         if pid:
@@ -103,6 +106,9 @@ def friendly_error(rc, site, detail=""):
                              or "provide valid cookies" in d):
         return ("TikTok didn't show this profile's videos. Log in to TikTok in the app "
                 "(TikTok account → Log in), then try again.")
+    if site == "facebook" and ("photo list" in d or "set_id" in d):
+        return ("Facebook didn't show this profile's photo list. Open one of their photos, "
+                "tap Share → Copy link, and paste that link: the app downloads that whole album.")
     if site == "facebook" and "temporarily blocked" in d:
         return "Facebook temporarily blocked viewing. Wait a few hours or use another account."
     if site == "facebook" and ("unsupported url" in d or "no suitable extractor" in d):
@@ -308,6 +314,9 @@ class Job:
 
         if (result == "done" and self.spec["site"] == "tiktok" and self.count == 0
                 and not self.posts and "could not extract any" in self.last_error.lower()):
+            result = "error"
+        if (result == "done" and self.spec["site"] == "facebook" and self.count == 0
+                and "photo list" in self.last_error.lower()):
             result = "error"
 
         self.flush_scan()

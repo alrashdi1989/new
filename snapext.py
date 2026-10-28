@@ -86,12 +86,39 @@ def _patch_tiktok_ytdl_fallback():
     tiktok.TiktokPostsExtractor._extract_posts_ytdl = safe
 
 
+FB_NO_LIST = "Facebook didn't include this profile's photo list"
+
+
+def _patch_facebook_profile():
+    """When Facebook's profile page doesn't contain the photo list, explain
+    what to do instead of crashing with KeyError 'set_id'."""
+    from gallery_dl.extractor import facebook
+    original = facebook.FacebookExtractor._extract_profile_page
+
+    def safe(self, url):
+        try:
+            user = original(self, url)
+        except TypeError:          # set_id found but no user data
+            user = None
+        if not user or not user.get("set_id"):
+            self.log.warning(
+                "%s. Tip: open one of their photos in Facebook, tap Share → Copy link, "
+                "and paste that link here; the app then downloads that whole album.",
+                FB_NO_LIST)
+            user = dict(user or {})
+            user.setdefault("set_id", "")
+        return user
+
+    facebook.FacebookExtractor._extract_profile_page = safe
+
+
 def register():
     global _registered
     if not _registered:
         extractor.add(SnapchatFullExtractor)
-        try:
-            _patch_tiktok_ytdl_fallback()
-        except Exception:
-            pass
+        for patch in (_patch_tiktok_ytdl_fallback, _patch_facebook_profile):
+            try:
+                patch()
+            except Exception:
+                pass
         _registered = True

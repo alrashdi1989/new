@@ -34,7 +34,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "3.7"
+APP_VERSION = "3.8"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -104,7 +104,12 @@ def resolve_link(text):
     if m:
         return "facebook", "videos", f"https://www.facebook.com/watch/?v={m.group(1)}"
     if re.match(fb + r"(?:photo/?\?|photo\.php\?)", t, re.I):
-        return "facebook", "photos", t.split("#")[0]
+        # A photo link that names its album downloads the whole album
+        m = re.search(r"[?&]set=([\w.-]+)", t)
+        if m:
+            return "facebook", "albums", f"https://www.facebook.com/media/set/?set={m.group(1)}"
+        return "facebook", "photos", re.sub(r"facebook\.com/photo\.php\?", "facebook.com/photo/?",
+                                            re.sub(r"^https?://(?:m|web|mbasic)\.", "https://www.", t.split("#")[0]))
     if re.match(fb + r"media/set/?\?", t, re.I):
         return "facebook", "albums", t.split("#")[0]
     m = re.match(fb + r"profile\.php\?(?:.*&)?id=(\d+)", t, re.I) or \
