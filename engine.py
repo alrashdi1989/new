@@ -47,6 +47,10 @@ SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Inst
 def friendly_error(rc, site, detail=""):
     name = SITE.get(site, "The site")
     d = detail.lower()
+    if site == "tiktok" and ("could not extract any" in d or "need cookies" in d
+                             or "provide valid cookies" in d):
+        return ("TikTok didn't show this profile's videos. Log in to TikTok in the app "
+                "(TikTok account → Log in), then try again.")
     if rc and rc & 16 or "401" in d or "login" in d or "auth" in d:
         return f"{name} needs you to be logged in."
     if "404" in d or "not found" in d or "does not exist" in d or "suspended" in d:
@@ -214,6 +218,10 @@ class Job:
             self.log(f"Error: {e}")
         finally:
             sys.stdout, sys.stderr, sys.argv = old
+
+        if (result == "done" and self.spec["site"] == "tiktok" and self.count == 0
+                and not self.posts and "could not extract any" in self.last_error.lower()):
+            result = "error"
 
         self.flush_scan()
         try:

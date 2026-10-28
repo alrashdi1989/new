@@ -719,7 +719,7 @@ KV = """
                             width: dp(124)
                             on_release: root.login("x")
                     Caption:
-                        text: "TIKTOK ACCOUNT  (optional)"
+                        text: "TIKTOK ACCOUNT  (needed for profiles)"
                     BoxLayout:
                         size_hint_y: None
                         height: dp(50)
