@@ -34,9 +34,19 @@ class SnapchatFullExtractor(SnapchatExtractor):
             if spot.get("snapList"):
                 sections.append(("Spotlight", spot))
 
+        wanted = self.config("sections")
+        if wanted:
+            if isinstance(wanted, str):
+                wanted = [w.strip() for w in wanted.split(",")]
+            wanted = {w.lower() for w in wanted}
+            sections = [(n, g) for n, g in sections if n.lower() in wanted]
+
         total = sum(len(group["snapList"]) for _, group in sections)
         if not total:
-            self.log.info("@%s has no public story, highlights or Spotlight right now", user)
+            if wanted and wanted <= {"none", ""}:
+                self.log.info("Nothing selected for Snapchat (pick Stories, Highlights or Spotlight)")
+            else:
+                self.log.info("@%s has nothing public in the selected sections right now", user)
             yield Message.Directory, "", page
 
         current = None
@@ -84,32 +94,6 @@ def _patch_tiktok_ytdl_fallback():
             return []
 
     tiktok.TiktokPostsExtractor._extract_posts_ytdl = safe
-
-
-FB_NO_LIST = "Facebook didn't include this profile's photo list"
-
-
-def _patch_facebook_profile():
-    """When Facebook's profile page doesn't contain the photo list, explain
-    what to do instead of crashing with KeyError 'set_id'."""
-    from gallery_dl.extractor import facebook
-    original = facebook.FacebookExtractor._extract_profile_page
-
-    def safe(self, url):
-        try:
-            user = original(self, url)
-        except TypeError:          # set_id found but no user data
-            user = None
-        if not user or not user.get("set_id"):
-            self.log.warning(
-                "%s. Tip: open one of their photos in Facebook, tap Share → Copy link, "
-                "and paste that link here; the app then downloads that whole album.",
-                FB_NO_LIST)
-            user = dict(user or {})
-            user.setdefault("set_id", "")
-        return user
-
-    facebook.FacebookExtractor._extract_profile_page = safe
 
 
 FB_NO_PHOTOS = "Facebook didn't show this profile's photos"

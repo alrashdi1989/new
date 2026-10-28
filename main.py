@@ -22,6 +22,7 @@ from kivy.lang import Builder
 from kivy.properties import BooleanProperty, ListProperty, NumericProperty
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.gridlayout import GridLayout  # noqa: F401 (used in KV)
 from kivy.uix.modalview import ModalView
 from kivy.uix.textinput import TextInput
 from kivy.uix.togglebutton import ToggleButton
@@ -34,7 +35,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "3.8"
+APP_VERSION = "3.9"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -164,7 +165,8 @@ def parse_links(text):
 
 
 def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_cookies=None,
-               site_ua=None):
+               site_ua=None, content=None):
+    content = set(content) if content is not None else {"stories", "highlights", "posts", "spotlight"}
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     args = [
         "-d", out_dir,
@@ -174,6 +176,9 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
         "-o", "path-restrict=windows",
         "-o", "path-strip=windows",
         "-o", ('directory=["{section}"]' if site == "snapchat" else
+               'directory=["{subcategory!c}"]' if (site == "tiktok" and url.endswith("/posts")
+                                                   and "stories" in content
+                                                   and "posts" in content) else
                'directory=["{subcategory!c}"]' if site == "instagram" and is_ig_profile(url) else
                "directory=[]"),
         "--filter", f"extension in {exts!r}",
@@ -188,14 +193,24 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
             # List profile videos with yt-dlp first (kept up to date with TikTok's
             # site changes); the engine falls back to its own method if that fails.
             args += ["-o", "ytdl=true"]
+            if "stories" in content or "posts" not in content:
+                inc = [k for k in ("posts", "stories") if k in content]
+                args += ["-o", "include=" + (",".join(inc) or "none")]
+                url = url[:-len("posts")]          # whole profile, filtered by include
         if site_cookies:  # the TikTok login is only ever sent to TikTok
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
+    elif site == "snapchat":
+        if url.startswith("snapfull:"):
+            sec = [n for k, n in (("stories", "Story"), ("highlights", "Highlights"),
+                                  ("spotlight", "Spotlight")) if k in content]
+            args += ["-o", "sections=" + (",".join(sec) or "none")]
     elif site == "facebook":
         if site_cookies:  # the Facebook login is only ever sent to Facebook
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
     elif site == "instagram":
         if is_ig_profile(url):
-            args += ["-o", "include=stories,highlights,posts"]
+            inc = [k for k in ("stories", "highlights", "posts") if k in content]
+            args += ["-o", "include=" + (",".join(inc) or "none")]
         if site_cookies:  # the Instagram login is only ever sent to Instagram
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
     # Report each post's id plus the profile's post count, so the app can show
@@ -556,6 +571,22 @@ KV = """
             points: [self.x + dp(26), self.top - dp(1.5), self.right - dp(26), self.top - dp(1.5)]
             width: dp(1)
 
+<SiteBadge@Label>:
+    badge: 0.3, 0.3, 0.35, 1
+    ink: 1, 1, 1, 1
+    size_hint: None, None
+    size: dp(40), dp(40)
+    pos_hint: {"center_y": .5}
+    bold: True
+    font_size: "13sp"
+    color: self.ink
+    canvas.before:
+        Color:
+            rgba: self.badge
+        Ellipse:
+            pos: self.pos
+            size: self.size
+
 <Caption@Label>:
     size_hint_y: None
     height: dp(18)
@@ -766,15 +797,19 @@ KV = """
                         size_hint_y: None
                         height: dp(50)
                         spacing: dp(8)
+                        SiteBadge:
+                            text: "X"
+                            badge: 0.13, 0.14, 0.17, 1
+                            ink: 1, 1, 1, 1
                         GlassInput:
                             id: token
                             hint_text: "auth_token"
                             password: True
                         GhostButton:
                             id: login_btn
-                            text: "Log in to X"
+                            text: "Log in"
                             size_hint_x: None
-                            width: dp(124)
+                            width: dp(100)
                             on_release: root.login("x")
                     Caption:
                         text: "TIKTOK ACCOUNT  (needed for profiles)"
@@ -782,15 +817,19 @@ KV = """
                         size_hint_y: None
                         height: dp(50)
                         spacing: dp(8)
+                        SiteBadge:
+                            text: "TT"
+                            badge: 0.93, 0.22, 0.42, 1
+                            ink: 1, 1, 1, 1
                         GlassInput:
                             id: tt_state
                             readonly: True
-                            hint_text: "Not signed in"
+                            hint_text: "Logged out"
                         GhostButton:
                             id: tt_btn
                             text: "Log in"
                             size_hint_x: None
-                            width: dp(124)
+                            width: dp(100)
                             on_release: root.login("tiktok")
                     Caption:
                         text: "INSTAGRAM ACCOUNT  (required)"
@@ -798,15 +837,19 @@ KV = """
                         size_hint_y: None
                         height: dp(50)
                         spacing: dp(8)
+                        SiteBadge:
+                            text: "IG"
+                            badge: 0.72, 0.25, 0.68, 1
+                            ink: 1, 1, 1, 1
                         GlassInput:
                             id: ig_state
                             readonly: True
-                            hint_text: "Not signed in"
+                            hint_text: "Logged out"
                         GhostButton:
                             id: ig_btn
                             text: "Log in"
                             size_hint_x: None
-                            width: dp(124)
+                            width: dp(100)
                             on_release: root.login("instagram")
                     Caption:
                         text: "FACEBOOK ACCOUNT  (recommended)"
@@ -814,15 +857,19 @@ KV = """
                         size_hint_y: None
                         height: dp(50)
                         spacing: dp(8)
+                        SiteBadge:
+                            text: "FB"
+                            badge: 0.15, 0.45, 0.93, 1
+                            ink: 1, 1, 1, 1
                         GlassInput:
                             id: fb_state
                             readonly: True
-                            hint_text: "Not signed in"
+                            hint_text: "Logged out"
                         GhostButton:
                             id: fb_btn
                             text: "Log in"
                             size_hint_x: None
-                            width: dp(124)
+                            width: dp(100)
                             on_release: root.login("facebook")
                     Caption:
                         text: "SAVE TO"
@@ -856,6 +903,37 @@ KV = """
                         Chip:
                             id: retweets
                             text: "X reposts"
+                    Caption:
+                        text: "FROM PROFILES"
+                    GridLayout:
+                        cols: 4
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(6)
+                        Chip:
+                            id: c_story
+                            text: "Stories"
+                            font_size: "13sp"
+                            state: "down"
+                            on_state: root.save_content()
+                        Chip:
+                            id: c_high
+                            text: "Highlights"
+                            font_size: "13sp"
+                            state: "down"
+                            on_state: root.save_content()
+                        Chip:
+                            id: c_posts
+                            text: "Posts"
+                            font_size: "13sp"
+                            state: "down"
+                            on_state: root.save_content()
+                        Chip:
+                            id: c_spot
+                            text: "Spotlight"
+                            font_size: "13sp"
+                            state: "down"
+                            on_state: root.save_content()
                     Widget:
                         size_hint_y: None
                         height: dp(2)
@@ -991,6 +1069,7 @@ class Root(FloatLayout):
             if store.exists(site):
                 self.ids[state_id].text = "Signed in"
                 self.ids[btn_id].text = "Sign out"
+        self.restore_content()
         self._job_poll = None
         self._log_pos = 0
         self.save_dir = store.get("folder")["path"] if store.exists("folder") else download_root()
@@ -1043,6 +1122,26 @@ class Root(FloatLayout):
             self.set_status("Log copied. Paste it in the chat.")
         except Exception as e:
             self.set_status(f"Couldn't copy the log: {e}")
+
+    CONTENT_IDS = {"stories": "c_story", "highlights": "c_high", "posts": "c_posts",
+                   "spotlight": "c_spot"}
+
+    def content(self):
+        return {k for k, i in self.CONTENT_IDS.items() if self.ids[i].state == "down"}
+
+    def save_content(self):
+        if getattr(self, "_restoring", False) or not hasattr(self, "store"):
+            return
+        self.store.put("content", picked=sorted(self.content()))
+
+    def restore_content(self):
+        if not self.store.exists("content"):
+            return
+        picked = set(self.store.get("content")["picked"])
+        self._restoring = True
+        for k, i in self.CONTENT_IDS.items():
+            self.ids[i].state = "down" if k in picked else "normal"
+        self._restoring = False
 
     def update_link_count(self):
         self.link_count = len(parse_links(self.url.text)[0])
@@ -1213,6 +1312,11 @@ class Root(FloatLayout):
             self.set_status("Log in to Instagram first (Instagram account → Log in).")
             self.set_state(ERR)
             return
+        content = self.content()
+        if not content and any(l[0] in ("snapchat", "instagram", "tiktok") for l in links):
+            self.set_status("Pick at least one of Stories, Highlights, Posts or Spotlight.")
+            self.set_state(ERR)
+            return
         if not self.ensure_access():
             self.set_status("Allow file access, then tap Download again.")
             return
@@ -1226,7 +1330,8 @@ class Root(FloatLayout):
                                    self.store.get(site)["cookies"]
                                    if site in ROW_IDS and self.store.exists(site) else None,
                                    (self.store.get(site).get("ua") or login_ua())
-                                   if site in ROW_IDS and self.store.exists(site) else None),
+                                   if site in ROW_IDS and self.store.exists(site) else None,
+                                   content),
                 "out": out, "out_label": pretty_path(out), "site": site, "user": user,
                 "status_dir": self.status_dir,
             })

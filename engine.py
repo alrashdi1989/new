@@ -263,6 +263,8 @@ class Job:
         self.notify(f"{self.prefix}Downloading @{self.spec['user']}…")
         threading.Thread(target=self._heartbeat, daemon=True).start()
         self.log("Fetching media list…")
+        self.save(status=f"{self.prefix}Getting the list from {SITE.get(self.spec['site'], 'the site')}… "
+                         "big profiles can take a few minutes")
 
         import gallery_dl
         import snapext

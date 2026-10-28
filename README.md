@@ -88,3 +88,11 @@ to logged-out visitors quickly). Paste a profile or Page link to download its
 photos, or paste a photo, album, video, reel or shared (`facebook.com/share/…`,
 `fb.watch/…`) link. Facebook doesn't offer a profile's full video list or
 stories to this engine. Files go to `Facebook/<name>/`.
+
+## Choose what to download
+
+Under **From profiles**, pick any of **Stories, Highlights, Posts, Spotlight**.
+They apply where a site has that content: Snapchat (story, highlights,
+Spotlight), Instagram (stories, highlights, posts), TikTok (posts, stories).
+X and Facebook profiles always download their media/photos. Your choice is
+remembered.
