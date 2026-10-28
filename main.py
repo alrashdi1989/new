@@ -34,7 +34,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "3.4"
+APP_VERSION = "3.5"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -179,6 +179,10 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
             args += ["-o", 'cookies={"auth_token": "%s"}' % auth_token.strip()]
     elif site == "tiktok":
         args += ["-o", "audio=false", "-o", "covers=false"]
+        if url.endswith("/posts"):
+            # List profile videos with yt-dlp first (kept up to date with TikTok's
+            # site changes); the engine falls back to its own method if that fails.
+            args += ["-o", "ytdl=true"]
         if site_cookies:  # the TikTok login is only ever sent to TikTok
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
             if site_ua:  # same browser identity the login was made with

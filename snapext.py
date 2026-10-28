@@ -67,8 +67,31 @@ class SnapchatFullExtractor(SnapchatExtractor):
 _registered = False
 
 
+def _patch_tiktok_ytdl_fallback():
+    """If listing a TikTok profile through yt-dlp fails, fall back to the
+    engine's own method instead of stopping the download."""
+    from gallery_dl.extractor import tiktok
+    original = tiktok.TiktokPostsExtractor._extract_posts_ytdl
+
+    def safe(self, profile_url):
+        try:
+            return original(self, profile_url)
+        except BaseException as exc:          # yt-dlp raises DownloadError / SystemExit
+            if isinstance(exc, KeyboardInterrupt):
+                raise
+            self.log.warning("yt-dlp couldn't list this profile (%s); trying another way",
+                             str(exc).splitlines()[0][:160])
+            return []
+
+    tiktok.TiktokPostsExtractor._extract_posts_ytdl = safe
+
+
 def register():
     global _registered
     if not _registered:
         extractor.add(SnapchatFullExtractor)
+        try:
+            _patch_tiktok_ytdl_fallback()
+        except Exception:
+            pass
         _registered = True
