@@ -34,7 +34,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "3.5"
+APP_VERSION = "3.6"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -185,20 +185,14 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
             args += ["-o", "ytdl=true"]
         if site_cookies:  # the TikTok login is only ever sent to TikTok
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
-            if site_ua:  # same browser identity the login was made with
-                args += ["-o", "user-agent=" + site_ua]
     elif site == "facebook":
         if site_cookies:  # the Facebook login is only ever sent to Facebook
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
-            if site_ua:  # same browser identity the login was made with
-                args += ["-o", "user-agent=" + site_ua]
     elif site == "instagram":
         if is_ig_profile(url):
             args += ["-o", "include=stories,highlights,posts"]
         if site_cookies:  # the Instagram login is only ever sent to Instagram
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
-            if site_ua:  # same browser identity the login was made with
-                args += ["-o", "user-agent=" + site_ua]
     # Report each post's id plus the profile's post count, so the app can show
     # "post N of ~total" (only meaningful for whole profiles).
     if site == "x" and url.endswith("/media"):
