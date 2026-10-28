@@ -1007,7 +1007,7 @@ class Root(FloatLayout):
     # ---- in-app X login (Android WebView) ----
     LOGIN = {
         "x": ("https://x.com/i/flow/login", "auth_token", "X"),
-        "tiktok": ("https://www.tiktok.com/login/phone-or-email/email", "sessionid", "TikTok"),
+        "tiktok": ("https://www.tiktok.com/login/phone-or-email/phone", "sessionid", "TikTok"),
         "instagram": ("https://www.instagram.com/accounts/login/", "sessionid", "Instagram"),
     }
 
@@ -1031,7 +1031,9 @@ class Root(FloatLayout):
         self._login_active = True
         self._login_done = threading.Event()
         webview_open(url, self._login_done.set, self.write)
-        self.set_status(f"Log in to {name} with username/email and password, then wait or tap Done.")
+        how = ("phone number + SMS code, or username/email + password (Google won't work here)"
+               if site == "tiktok" else "username/email and password (Google won't work here)")
+        self.set_status(f"Log in to {name} with {how}.")
         threading.Thread(target=self._watch_login, args=(site,), daemon=True).start()
 
     def _watch_login(self, site):
