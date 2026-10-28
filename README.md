@@ -80,3 +80,11 @@ Paste several links into the box (one per line, or tap **+ Paste** after
 copying each one). Tap **Download N links**: they download one after another
 in the background, each into its own folder. One failing link doesn't stop the
 rest, and **Stop** cancels the remaining ones.
+
+## Facebook
+
+Log in under **Facebook account** (recommended — Facebook stops showing photos
+to logged-out visitors quickly). Paste a profile or Page link to download its
+photos, or paste a photo, album, video, reel or shared (`facebook.com/share/…`,
+`fb.watch/…`) link. Facebook doesn't offer a profile's full video list or
+stories to this engine. Files go to `Facebook/<name>/`.

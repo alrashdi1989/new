@@ -31,6 +31,9 @@ import engine
 
 RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "settings",
             "compose", "login", "logout", "signup", "tos", "privacy", "hashtag", "intent"}
+FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
+               "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
+               "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -88,6 +91,28 @@ def resolve_link(text):
     m = re.match(ig + r"([\w.]{1,30})/?(?:[?#].*)?$", t, re.I)
     if m and m.group(1).lower() not in IG_RESERVED:
         return "instagram", m.group(1), f"https://www.instagram.com/{m.group(1)}/"
+
+    # Facebook
+    fb = r"^https?://(?:www\.|m\.|web\.|mbasic\.)?facebook\.com/"
+    if re.match(r"^https?://fb\.watch/", t, re.I) or re.match(fb + r"share/", t, re.I):
+        return "facebook", "shared", t.split("#")[0]          # resolved when downloading
+    m = re.match(fb + r"(?:[\w.]+/)?(?:reel|reels)/(\d+)", t, re.I)
+    if m:
+        return "facebook", "videos", f"https://www.facebook.com/watch/?v={m.group(1)}"
+    m = re.match(fb + r"watch/?\?(?:.*&)?v=(\d+)", t, re.I) or re.match(fb + r"[\w.]+/videos/(?:[^/?#]+/)?(\d+)", t, re.I)
+    if m:
+        return "facebook", "videos", f"https://www.facebook.com/watch/?v={m.group(1)}"
+    if re.match(fb + r"(?:photo/?\?|photo\.php\?)", t, re.I):
+        return "facebook", "photos", t.split("#")[0]
+    if re.match(fb + r"media/set/?\?", t, re.I):
+        return "facebook", "albums", t.split("#")[0]
+    m = re.match(fb + r"profile\.php\?(?:.*&)?id=(\d+)", t, re.I) or \
+        re.match(fb + r"people/[^/?#]+/(\d+)", t, re.I)
+    if m:
+        return "facebook", m.group(1), f"https://www.facebook.com/{m.group(1)}/photos"
+    m = re.match(fb + r"([\w.-]{2,80})/?(?:(?:photos|photos_by)/?)?(?:[?#].*)?$", t, re.I)
+    if m and m.group(1).lower() not in FB_RESERVED:
+        return "facebook", m.group(1), f"https://www.facebook.com/{m.group(1)}/photos"
 
     # Snapchat single highlight / story link -> download just that one
     m = re.match(r"^https?://(?:www\.)?snapchat\.com/(?:@|add/)([\w.-]+)/(?:highlight/)?[^/?#]{20,}", t, re.I)
@@ -154,6 +179,9 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
         args += ["-o", "audio=false", "-o", "covers=false"]
         if site_cookies:  # the TikTok login is only ever sent to TikTok
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
+    elif site == "facebook":
+        if site_cookies:  # the Facebook login is only ever sent to Facebook
+            args += ["-o", "cookies=" + json.dumps(site_cookies)]
     elif site == "instagram":
         if is_ig_profile(url):
             args += ["-o", "include=stories,highlights,posts"]
@@ -173,8 +201,10 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
     return args
 
 
-SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram"}
-FOLDERS = {"tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram"}
+SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
+              "facebook": "Facebook"}
+FOLDERS = {"tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
+           "facebook": "Facebook"}
 
 
 def is_ig_profile(url):
@@ -431,6 +461,7 @@ if platform == "android":
         "x": ("https://x.com", "https://twitter.com", "https://www.x.com"),
         "tiktok": ("https://www.tiktok.com", "https://tiktok.com", "https://m.tiktok.com"),
         "instagram": ("https://www.instagram.com", "https://instagram.com", "https://i.instagram.com"),
+        "facebook": ("https://www.facebook.com", "https://m.facebook.com", "https://facebook.com"),
     }
 
     def webview_cookies(site):
@@ -661,7 +692,7 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "X · TikTok · Snapchat · Instagram"
+                    text: "X, TikTok, Snapchat, Instagram, FB"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
@@ -750,6 +781,22 @@ KV = """
                             size_hint_x: None
                             width: dp(124)
                             on_release: root.login("instagram")
+                    Caption:
+                        text: "FACEBOOK ACCOUNT  (recommended)"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(50)
+                        spacing: dp(8)
+                        GlassInput:
+                            id: fb_state
+                            readonly: True
+                            hint_text: "Not signed in"
+                        GhostButton:
+                            id: fb_btn
+                            text: "Log in"
+                            size_hint_x: None
+                            width: dp(124)
+                            on_release: root.login("facebook")
                     Caption:
                         text: "SAVE TO"
                     BoxLayout:
@@ -882,7 +929,8 @@ Builder.load_string(KV)
 IDLE, BUSY, OK, ERR = (1, 1, 1, .4), (.40, .85, 1, 1), (.30, .86, .64, 1), (.98, .45, .45, 1)
 
 
-ROW_IDS = {"tiktok": ("tt_state", "tt_btn"), "instagram": ("ig_state", "ig_btn")}
+ROW_IDS = {"tiktok": ("tt_state", "tt_btn"), "instagram": ("ig_state", "ig_btn"),
+           "facebook": ("fb_state", "fb_btn")}
 
 
 class Root(FloatLayout):
@@ -1009,6 +1057,7 @@ class Root(FloatLayout):
         "x": ("https://x.com/i/flow/login", "auth_token", "X"),
         "tiktok": ("https://www.tiktok.com/login/phone-or-email/phone", "sessionid", "TikTok"),
         "instagram": ("https://www.instagram.com/accounts/login/", "sessionid", "Instagram"),
+        "facebook": ("https://m.facebook.com/login/", "c_user", "Facebook"),
     }
 
     def login(self, site="x"):
@@ -1099,7 +1148,7 @@ class Root(FloatLayout):
             return
         links, bad = parse_links(self.url.text)
         if not links:
-            self.set_status("Paste an X, TikTok, Snapchat or Instagram link.")
+            self.set_status("Paste an X, TikTok, Snapchat, Instagram or Facebook link.")
             self.set_state(ERR)
             return
         if not (self.images.active or self.videos.active):

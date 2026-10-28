@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -41,7 +42,24 @@ def request_cancel(status_dir):
         pass
 
 
-SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram"}
+SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
+        "facebook": "Facebook"}
+
+
+def resolve_facebook_share(url, cookies=None):
+    """Follow a facebook.com/share/... or fb.watch link to the real post URL."""
+    import re
+    import requests
+    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
+    r = requests.get(url, headers={"User-Agent": ua}, cookies=cookies or {},
+                     allow_redirects=True, timeout=30)
+    final = r.url
+    m = re.search(r"/(?:reel|reels)/(\d+)", final) or re.search(r"[?&]v=(\d+)", final) \
+        or re.search(r"/videos/(?:[^/?#]+/)?(\d+)", final)
+    if m:
+        return f"https://www.facebook.com/watch/?v={m.group(1)}"
+    return final
 
 
 def friendly_error(rc, site, detail=""):
@@ -51,6 +69,11 @@ def friendly_error(rc, site, detail=""):
                              or "provide valid cookies" in d):
         return ("TikTok didn't show this profile's videos. Log in to TikTok in the app "
                 "(TikTok account → Log in), then try again.")
+    if site == "facebook" and "temporarily blocked" in d:
+        return "Facebook temporarily blocked viewing. Wait a few hours or use another account."
+    if site == "facebook" and ("unsupported url" in d or "no suitable extractor" in d):
+        return ("This kind of Facebook link isn't supported. Use a profile/page, photo, "
+                "album, video or reel link.")
     if rc and rc & 16 or "401" in d or "login" in d or "auth" in d:
         return f"{name} needs you to be logged in."
     if "404" in d or "not found" in d or "does not exist" in d or "suspended" in d:
@@ -204,7 +227,16 @@ class Job:
         gallery_dl.config.clear()
         writer = _LineWriter(self.on_line)
         sys.stdout = sys.stderr = writer
-        sys.argv = ["gallery-dl"] + list(self.spec["args"])
+        args = list(self.spec["args"])
+        if self.spec["site"] == "facebook" and re.search(r"fb\.watch/|facebook\.com/share/", args[-1]):
+            try:
+                cookies = next((json.loads(a[8:]) for a in args if a.startswith("cookies=")), None)
+                real = resolve_facebook_share(args[-1], cookies)
+                self.log(f"Shared link opens: {real}")
+                args[-1] = real
+            except Exception as e:
+                self.log(f"Couldn't open the shared link: {e}")
+        sys.argv = ["gallery-dl"] + args
         try:
             rc = gallery_dl.main() or 0
             result = "done" if rc == 0 else "error"
