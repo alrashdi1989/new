@@ -34,7 +34,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "3.6"
+APP_VERSION = "3.7"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")

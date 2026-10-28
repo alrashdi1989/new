@@ -46,20 +46,54 @@ SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Inst
         "facebook": "Facebook"}
 
 
-def resolve_facebook_share(url, cookies=None):
-    """Follow a facebook.com/share/... or fb.watch link to the real post URL."""
+def normalize_facebook_url(final):
+    """Turn whatever a shared link opened into a link the engine can download."""
     import re
-    import requests
-    ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-          "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
-    r = requests.get(url, headers={"User-Agent": ua}, cookies=cookies or {},
-                     allow_redirects=True, timeout=30)
-    final = r.url
+    from urllib.parse import urlsplit, parse_qs
     m = re.search(r"/(?:reel|reels)/(\d+)", final) or re.search(r"[?&]v=(\d+)", final) \
         or re.search(r"/videos/(?:[^/?#]+/)?(\d+)", final)
     if m:
         return f"https://www.facebook.com/watch/?v={m.group(1)}"
+    parts = urlsplit(final)
+    path = parts.path.rstrip("/")
+    if re.search(r"/(photo|photo\.php|media/set)", path):
+        return final
+    if path.endswith("profile.php"):
+        pid = parse_qs(parts.query).get("id", [""])[0]
+        if pid:
+            return f"https://www.facebook.com/{pid}/photos"
+    m = re.fullmatch(r"/(?:people/[^/]+/)?([\w.-]+)", path)
+    if m and m.group(1) not in ("share", "watch", "login", "login.php"):
+        return f"https://www.facebook.com/{m.group(1)}/photos"
     return final
+
+
+def resolve_facebook_share(url, cookies=None):
+    """Follow a facebook.com/share/... or fb.watch link to the real profile/post."""
+    import re
+    import requests
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/128.0 Safari/537.36"),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+    }
+    r = requests.get(url, headers=headers, cookies=cookies or {},
+                     allow_redirects=True, timeout=30)
+    final = r.url
+    if re.search(r"facebook\.com/share/|fb\.watch/", final):
+        # Not forwarded: the page still names the real address.
+        html = r.text
+        m = (re.search(r'property="og:url"\s+content="([^"]+)"', html)
+             or re.search(r'rel="canonical"\s+href="([^"]+)"', html))
+        if m:
+            final = m.group(1).replace("&amp;", "&")
+    return normalize_facebook_url(final)
 
 
 def friendly_error(rc, site, detail=""):
@@ -237,6 +271,24 @@ class Job:
                 real = resolve_facebook_share(args[-1], cookies)
                 self.log(f"Shared link opens: {real}")
                 args[-1] = real
+                # Save under the real name instead of "shared"
+                m = re.fullmatch(r"https://www\.facebook\.com/([\w.-]+)/photos", real)
+                shared_dir = self.spec["out"]
+                if m and os.path.basename(shared_dir) == "shared":
+                    new_dir = os.path.join(os.path.dirname(shared_dir), m.group(1))
+                    os.makedirs(new_dir, exist_ok=True)
+                    args = [a.replace(shared_dir, new_dir)
+                            if isinstance(a, str) and a.startswith(shared_dir) else a
+                            for a in args]
+                    self.spec["out"] = new_dir
+                    self.spec["user"] = m.group(1)
+                    if self.spec.get("out_label"):
+                        self.spec["out_label"] = os.path.join(
+                            os.path.dirname(self.spec["out_label"]), m.group(1))
+                    try:
+                        os.rmdir(shared_dir)
+                    except OSError:
+                        pass
             except Exception as e:
                 self.log(f"Couldn't open the shared link: {e}")
         sys.argv = ["gallery-dl"] + args
