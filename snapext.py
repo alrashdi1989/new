@@ -112,6 +112,28 @@ def _patch_facebook_profile():
     facebook.FacebookExtractor._extract_profile_page = safe
 
 
+FB_NO_PHOTOS = "Facebook didn't show this profile's photos"
+
+
+def _patch_facebook_profile():
+    """When Facebook's profile page has no photo album (logged out, private
+    photos, or a layout the engine can't read), explain it instead of crashing
+    with KeyError: 'set_id'."""
+    from gallery_dl.extractor import facebook
+    original = facebook.FacebookExtractor._extract_profile_page
+
+    def safe(self, url):
+        user = original(self, url) or {}
+        if not user.get("set_id"):
+            self.log.warning("%s (log in to Facebook in the app, or the photos "
+                             "aren't public)", FB_NO_PHOTOS)
+            user = dict(user)
+            user["set_id"] = ""
+        return user
+
+    facebook.FacebookExtractor._extract_profile_page = safe
+
+
 def register():
     global _registered
     if not _registered:
