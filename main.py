@@ -34,6 +34,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
+APP_VERSION = "3.4"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -887,6 +888,13 @@ KV = """
                             valign: "top"
                             text_size: self.width, None
                             max_lines: 3
+                        GhostButton:
+                            text: "Copy log"
+                            font_size: "12sp"
+                            size_hint: None, None
+                            size: dp(84), dp(30)
+                            pos_hint: {"top": 1}
+                            on_release: root.copy_log()
                     Widget:
                         size_hint_y: None
                         height: dp(6) if root.progress >= 0 else 0
@@ -1014,6 +1022,24 @@ class Root(FloatLayout):
             return
         self.url.text = (self.url.text.rstrip() + "\n" + clip) if self.url.text.strip() else clip
         self.url.cursor = (0, len(self.url._lines) - 1)
+
+    def copy_log(self):
+        """Copy the full log of the last download, for sharing when something fails."""
+        try:
+            with open(engine.paths(self.status_dir)[1], encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = self.log.text.splitlines()
+        text = "\n".join([f"Media Downloader {APP_VERSION}", f"Status: {self.status.text}"] + lines[-200:])
+        # never share login secrets
+        text = re.sub(r"(auth_token|sessionid|c_user|xs|csrftoken|sid_tt|sid_guard|msToken)=\S+",
+                      r"\1=<hidden>", text)
+        try:
+            from kivy.core.clipboard import Clipboard
+            Clipboard.copy(text)
+            self.set_status("Log copied. Paste it in the chat.")
+        except Exception as e:
+            self.set_status(f"Couldn't copy the log: {e}")
 
     def update_link_count(self):
         self.link_count = len(parse_links(self.url.text)[0])

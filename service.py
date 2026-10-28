@@ -49,7 +49,10 @@ try:
     nm = service.getSystemService(Context.NOTIFICATION_SERVICE)
     nm.createNotificationChannel(
         NotificationChannel(CHANNEL, cs("Downloads"), NotificationManager.IMPORTANCE_LOW))
-    icon = service.getApplicationInfo().icon
+    # Android needs a plain white silhouette here; the colourful app icon shows as a square.
+    _sysdraw = autoclass("android.R$drawable")
+    icon = _sysdraw.stat_sys_download
+    icon_done = _sysdraw.stat_sys_download_done
     launch = service.getPackageManager().getLaunchIntentForPackage(service.getPackageName())
     tap = PendingIntent.getActivity(service, 0, launch, PendingIntent.FLAG_IMMUTABLE)
 except Exception:
@@ -63,7 +66,7 @@ def notify(text, done=False):
         b = Builder(service, CHANNEL)
         b.setContentTitle(cs("Media Downloader"))
         b.setContentText(cs(text))
-        b.setSmallIcon(icon)
+        b.setSmallIcon(icon_done if done else icon)
         b.setContentIntent(tap)
         if done:
             b.setAutoCancel(True)
