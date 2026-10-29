@@ -96,3 +96,12 @@ They apply where a site has that content: Snapchat (story, highlights,
 Spotlight), Instagram (stories, highlights, posts), TikTok (posts, stories).
 X and Facebook profiles always download their media/photos. Your choice is
 remembered.
+
+## YouTube
+
+Paste a video, Shorts, playlist or channel link. Videos download in HD (up to
+1080p, H.264 + AAC in MP4). YouTube sends HD video and sound separately; the
+app joins them on the phone (PyAV, no re-encoding). Turn **Videos** off under
+*Include* to save audio only (M4A). Files go to `YouTube/<channel>/`.
+YouTube's terms only allow downloading where YouTube offers it, your own
+videos, or suitably licensed content.

@@ -43,7 +43,7 @@ def request_cancel(status_dir):
 
 
 SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-        "facebook": "Facebook"}
+        "facebook": "Facebook", "youtube": "YouTube"}
 
 
 def normalize_facebook_url(final):
@@ -109,6 +109,12 @@ def friendly_error(rc, site, detail=""):
     if site == "facebook" and ("photo list" in d or "set_id" in d):
         return ("Facebook didn't show this profile's photo list. Open one of their photos, "
                 "tap Share → Copy link, and paste that link: the app downloads that whole album.")
+    if site == "youtube" and ("sign in to confirm" in d or "not a bot" in d):
+        return "YouTube asked to confirm you're not a bot. Try again later or on another network."
+    if site == "youtube" and ("private video" in d or "members-only" in d or "join this channel" in d):
+        return "This YouTube video is private or members-only."
+    if site == "youtube" and ("age" in d and "confirm" in d):
+        return "This YouTube video is age-restricted and needs a signed-in account."
     if site == "facebook" and "didn't show this profile's photos" in d:
         return ("Facebook didn't show this profile's photos. Make sure you're logged in "
                 "to Facebook in the app; if you are, the photos may not be public.")
@@ -266,56 +272,61 @@ class Job:
         self.save(status=f"{self.prefix}Getting the list from {SITE.get(self.spec['site'], 'the site')}… "
                          "big profiles can take a few minutes")
 
-        import gallery_dl
-        import snapext
-        snapext.register()
-        rc, result = 1, "error"
-        old = sys.stdout, sys.stderr, sys.argv
-        logging.getLogger().handlers.clear()
-        gallery_dl.config.clear()
-        writer = _LineWriter(self.on_line)
-        sys.stdout = sys.stderr = writer
-        args = list(self.spec["args"])
-        if self.spec["site"] == "facebook" and re.search(r"fb\.watch/|facebook\.com/share/", args[-1]):
+        if self.spec["site"] == "youtube":
+            import ytjob
+            rc, result = ytjob.run(self)
+        else:
+            rc, result = 1, "error"
+            import gallery_dl
+            import snapext
+            snapext.register()
+            rc, result = 1, "error"
+            old = sys.stdout, sys.stderr, sys.argv
+            logging.getLogger().handlers.clear()
+            gallery_dl.config.clear()
+            writer = _LineWriter(self.on_line)
+            sys.stdout = sys.stderr = writer
+            args = list(self.spec["args"])
+            if self.spec["site"] == "facebook" and re.search(r"fb\.watch/|facebook\.com/share/", args[-1]):
+                try:
+                    cookies = next((json.loads(a[8:]) for a in args if a.startswith("cookies=")), None)
+                    real = resolve_facebook_share(args[-1], cookies)
+                    self.log(f"Shared link opens: {real}")
+                    args[-1] = real
+                    # Save under the real name instead of "shared"
+                    m = re.fullmatch(r"https://www\.facebook\.com/([\w.-]+)/photos", real)
+                    shared_dir = self.spec["out"]
+                    if m and os.path.basename(shared_dir) == "shared":
+                        new_dir = os.path.join(os.path.dirname(shared_dir), m.group(1))
+                        os.makedirs(new_dir, exist_ok=True)
+                        args = [a.replace(shared_dir, new_dir)
+                                if isinstance(a, str) and a.startswith(shared_dir) else a
+                                for a in args]
+                        self.spec["out"] = new_dir
+                        self.spec["user"] = m.group(1)
+                        if self.spec.get("out_label"):
+                            self.spec["out_label"] = os.path.join(
+                                os.path.dirname(self.spec["out_label"]), m.group(1))
+                        try:
+                            os.rmdir(shared_dir)
+                        except OSError:
+                            pass
+                except Exception as e:
+                    self.log(f"Couldn't open the shared link: {e}")
+            sys.argv = ["gallery-dl"] + args
             try:
-                cookies = next((json.loads(a[8:]) for a in args if a.startswith("cookies=")), None)
-                real = resolve_facebook_share(args[-1], cookies)
-                self.log(f"Shared link opens: {real}")
-                args[-1] = real
-                # Save under the real name instead of "shared"
-                m = re.fullmatch(r"https://www\.facebook\.com/([\w.-]+)/photos", real)
-                shared_dir = self.spec["out"]
-                if m and os.path.basename(shared_dir) == "shared":
-                    new_dir = os.path.join(os.path.dirname(shared_dir), m.group(1))
-                    os.makedirs(new_dir, exist_ok=True)
-                    args = [a.replace(shared_dir, new_dir)
-                            if isinstance(a, str) and a.startswith(shared_dir) else a
-                            for a in args]
-                    self.spec["out"] = new_dir
-                    self.spec["user"] = m.group(1)
-                    if self.spec.get("out_label"):
-                        self.spec["out_label"] = os.path.join(
-                            os.path.dirname(self.spec["out_label"]), m.group(1))
-                    try:
-                        os.rmdir(shared_dir)
-                    except OSError:
-                        pass
-            except Exception as e:
-                self.log(f"Couldn't open the shared link: {e}")
-        sys.argv = ["gallery-dl"] + args
-        try:
-            rc = gallery_dl.main() or 0
-            result = "done" if rc == 0 else "error"
-        except SystemExit as e:
-            if self.cancelled():
-                result = "cancelled"
-            else:
-                rc = e.code or 0
+                rc = gallery_dl.main() or 0
                 result = "done" if rc == 0 else "error"
-        except Exception as e:
-            self.log(f"Error: {e}")
-        finally:
-            sys.stdout, sys.stderr, sys.argv = old
+            except SystemExit as e:
+                if self.cancelled():
+                    result = "cancelled"
+                else:
+                    rc = e.code or 0
+                    result = "done" if rc == 0 else "error"
+            except Exception as e:
+                self.log(f"Error: {e}")
+            finally:
+                sys.stdout, sys.stderr, sys.argv = old
 
         if (result == "done" and self.spec["site"] == "tiktok" and self.count == 0
                 and not self.posts and "could not extract any" in self.last_error.lower()):

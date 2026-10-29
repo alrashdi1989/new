@@ -35,7 +35,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "3.9"
+APP_VERSION = "4.0"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -93,6 +93,20 @@ def resolve_link(text):
     m = re.match(ig + r"([\w.]{1,30})/?(?:[?#].*)?$", t, re.I)
     if m and m.group(1).lower() not in IG_RESERVED:
         return "instagram", m.group(1), f"https://www.instagram.com/{m.group(1)}/"
+
+    # YouTube (videos, shorts, playlists, channels)
+    yt = r"^https?://(?:www\.|m\.|music\.)?youtube\.com/"
+    m = re.match(r"^https?://youtu\.be/([\w-]{11})", t, re.I) or \
+        re.match(yt + r"(?:watch\?(?:.*&)?v=|shorts/|live/|embed/)([\w-]{11})", t, re.I)
+    if m and "list=" not in t:
+        return "youtube", "videos", f"https://www.youtube.com/watch?v={m.group(1)}"
+    m = re.search(r"[?&]list=([\w-]+)", t)
+    if m and re.match(yt, t, re.I):
+        return "youtube", "playlist", f"https://www.youtube.com/playlist?list={m.group(1)}"
+    m = re.match(yt + r"(@[\w.-]+|channel/[\w-]+|c/[\w.-]+|user/[\w.-]+)", t, re.I)
+    if m:
+        return "youtube", m.group(1).split("/")[-1].lstrip("@"), \
+            f"https://www.youtube.com/{m.group(1)}/videos"
 
     # Facebook
     fb = r"^https?://(?:www\.|m\.|web\.|mbasic\.)?facebook\.com/"
@@ -228,9 +242,9 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
 
 
 SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-              "facebook": "Facebook"}
+              "facebook": "Facebook", "youtube": "YouTube"}
 FOLDERS = {"tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-           "facebook": "Facebook"}
+           "facebook": "Facebook", "youtube": "YouTube"}
 
 
 def is_ig_profile(url):
@@ -241,6 +255,8 @@ def output_dir(save_dir, site, name):
     # X keeps its original layout so earlier downloads aren't repeated.
     if site == "x":
         return os.path.join(save_dir, name)
+    if site == "youtube":            # sorted into channel folders by the downloader
+        return os.path.join(save_dir, FOLDERS[site])
     return os.path.join(save_dir, FOLDERS[site], name)
 
 
@@ -750,7 +766,7 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "X, TikTok, Snapchat, Instagram, FB"
+                    text: "X, TikTok, Snapchat, IG, FB, YouTube"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
@@ -1298,7 +1314,7 @@ class Root(FloatLayout):
             return
         links, bad = parse_links(self.url.text)
         if not links:
-            self.set_status("Paste an X, TikTok, Snapchat, Instagram or Facebook link.")
+            self.set_status("Paste an X, TikTok, Snapchat, Instagram, Facebook or YouTube link.")
             self.set_state(ERR)
             return
         if not (self.images.active or self.videos.active):
@@ -1324,6 +1340,11 @@ class Root(FloatLayout):
         for site, user, gurl in links:
             out = output_dir(self.save_dir, site, user)
             os.makedirs(out, exist_ok=True)
+            if site == "youtube":
+                jobs.append({"args": [], "out": out, "out_label": pretty_path(out),
+                             "site": site, "user": user, "status_dir": self.status_dir,
+                             "yt": {"url": gurl, "audio_only": not self.videos.active}})
+                continue
             jobs.append({
                 "args": build_args(site, gurl, out, token, self.images.active,
                                    self.videos.active, self.retweets.active,
