@@ -35,7 +35,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.0"
+APP_VERSION = "4.1"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -153,6 +153,10 @@ def resolve_link(text):
     user = parse_username(text)
     if user:
         return "x", user, f"https://x.com/{user}/media"
+    # Any other website: video via yt-dlp, else images via the main engine
+    m = re.match(r"^https?://(?:www\.|m\.)?([^/\s:?#]+\.[^/\s:?#]+)", t, re.I)
+    if m:
+        return "web", m.group(1).lower(), t
     return None
 
 
@@ -242,9 +246,11 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
 
 
 SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-              "facebook": "Facebook", "youtube": "YouTube"}
+              "facebook": "Facebook", "youtube": "YouTube", "web": "website"}
 FOLDERS = {"tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-           "facebook": "Facebook", "youtube": "YouTube"}
+           "facebook": "Facebook", "youtube": "YouTube", "web": "Web"}
+WEB_FORMAT_HINT = ("bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]"
+                   "/b[height<=1080]/b")
 
 
 def is_ig_profile(url):
@@ -255,7 +261,7 @@ def output_dir(save_dir, site, name):
     # X keeps its original layout so earlier downloads aren't repeated.
     if site == "x":
         return os.path.join(save_dir, name)
-    if site == "youtube":            # sorted into channel folders by the downloader
+    if site in ("youtube", "web"):   # sorted into channel/site folders by the downloader
         return os.path.join(save_dir, FOLDERS[site])
     return os.path.join(save_dir, FOLDERS[site], name)
 
@@ -766,7 +772,7 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "X, TikTok, Snapchat, IG, FB, YouTube"
+                    text: "X, TikTok, Snapchat, IG, FB, YouTube & more"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
@@ -789,7 +795,7 @@ KV = """
                     GlassInput:
                         id: url
                         multiline: True
-                        hint_text: "Paste one or more profile or post links"
+                        hint_text: "Paste links from any site (one per line)"
                         height: min(max(dp(50), self.minimum_height), dp(170))
                         on_text: root.update_link_count()
                     BoxLayout:
@@ -1314,7 +1320,7 @@ class Root(FloatLayout):
             return
         links, bad = parse_links(self.url.text)
         if not links:
-            self.set_status("Paste an X, TikTok, Snapchat, Instagram, Facebook or YouTube link.")
+            self.set_status("Paste a link (X, TikTok, Snapchat, Instagram, Facebook, YouTube or any website).")
             self.set_state(ERR)
             return
         if not (self.images.active or self.videos.active):
@@ -1345,6 +1351,19 @@ class Root(FloatLayout):
                              "site": site, "user": user, "status_dir": self.status_dir,
                              "yt": {"url": gurl, "audio_only": not self.videos.active}})
                 continue
+            if site == "web":
+                gdl_out = os.path.join(out, "Images")
+                jobs.append({
+                    # images fallback (main engine) if no video is found
+                    "args": ["-d", gdl_out, "--download-archive",
+                             os.path.join(gdl_out, ".downloaded.sqlite3"),
+                             "-o", "path-restrict=windows", "-o", "path-strip=windows", gurl],
+                    "out": out, "out_label": pretty_path(out), "site": site, "user": user,
+                    "status_dir": self.status_dir,
+                    "yt": {"url": gurl, "audio_only": not self.videos.active,
+                           "format": WEB_FORMAT_HINT, "name": user,
+                           "folder": "%(extractor_key)s"}})
+                continue
             jobs.append({
                 "args": build_args(site, gurl, out, token, self.images.active,
                                    self.videos.active, self.retweets.active,
@@ -1369,7 +1388,8 @@ class Root(FloatLayout):
         self._log_pos = 0
         self.progress = -1
         self.busy = True
-        self.set_status(f"Downloading {SITE_NAMES[site]} @{user}…" if len(jobs) == 1
+        self.set_status((f"Downloading from {user}…" if site == "web"
+                         else f"Downloading {SITE_NAMES[site]} @{user}…") if len(jobs) == 1
                         else f"Downloading {len(jobs)} links…")
         self.set_state(BUSY)
         if bad:

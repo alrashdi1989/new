@@ -14,6 +14,9 @@ import time
 VIDEO_FORMAT = ("bv*[vcodec^=avc1][height<=1080][ext=mp4]+ba[ext=m4a]"
                 "/b[ext=mp4][height<=1080]/b[ext=mp4]/b")
 AUDIO_FORMAT = "ba[ext=m4a]/ba"
+# Other sites: prefer formats the phone can join (MP4 + M4A), else a single file.
+WEB_FORMAT = ("bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]"
+              "/b[height<=1080]/b")
 
 
 # ---------------------------------------------------------------- joining
@@ -120,6 +123,8 @@ def run(job):
     os.makedirs(out, exist_ok=True)
     state = {"last": 0.0}
 
+    tag = "youtube" if spec.get("site") == "youtube" else "web"
+
     class Logger:
         def debug(self, msg):
             if msg.startswith("[debug]"):
@@ -132,11 +137,11 @@ def run(job):
             self.debug(msg)
 
         def warning(self, msg):
-            job.log(f"[youtube][warning] {msg}")
+            job.log(f"[{tag}][warning] {msg}")
             job.last_error = msg
 
         def error(self, msg):
-            job.log(f"[youtube][error] {msg}")
+            job.log(f"[{tag}][error] {msg}")
             job.last_error = msg
 
     def on_progress(d):
@@ -166,13 +171,13 @@ def run(job):
         job.log("+ " + os.path.basename(path))
         job.save(count=job.count, total=job.total, seen=len(job.posts),
                  status=job.progress_text())
-        job.notify(f"{job.prefix}YouTube: {job.count} downloaded")
+        job.notify(f"{job.prefix}{yt.get('name', 'YouTube')}: {job.count} downloaded")
 
     opts = {
         "outtmpl": {"default": os.path.join(
-            out, "%(uploader,channel|YouTube)s", "%(title).120B [%(id)s].%(ext)s")},
+            out, yt.get("folder", "%(uploader,channel|YouTube)s"), "%(title).120B [%(id)s].%(ext)s")},
         "windowsfilenames": True,                 # Android shared storage rejects : ? * etc.
-        "format": AUDIO_FORMAT if yt.get("audio_only") else VIDEO_FORMAT,
+        "format": AUDIO_FORMAT if yt.get("audio_only") else yt.get("format", VIDEO_FORMAT),
         "merge_output_format": "mp4",
         "ignoreerrors": True,                     # keep going; also lets parts download without ffmpeg
         "download_archive": os.path.join(out, ".downloaded-youtube.txt"),

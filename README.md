@@ -105,3 +105,10 @@ app joins them on the phone (PyAV, no re-encoding). Turn **Videos** off under
 *Include* to save audio only (M4A). Files go to `YouTube/<channel>/`.
 YouTube's terms only allow downloading where YouTube offers it, your own
 videos, or suitably licensed content.
+
+## Any other website
+
+Paste a link from any site. The app first looks for a video (yt-dlp supports
+1000+ sites and videos embedded in ordinary pages), then for images (gallery-dl).
+Files go to `Web/<site>/`. DRM-protected services (Netflix, Disney+, Spotify…)
+can't be downloaded.

@@ -43,7 +43,7 @@ def request_cancel(status_dir):
 
 
 SITE = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-        "facebook": "Facebook", "youtube": "YouTube"}
+        "facebook": "Facebook", "youtube": "YouTube", "web": "the website"}
 
 
 def normalize_facebook_url(final):
@@ -109,6 +109,12 @@ def friendly_error(rc, site, detail=""):
     if site == "facebook" and ("photo list" in d or "set_id" in d):
         return ("Facebook didn't show this profile's photo list. Open one of their photos, "
                 "tap Share → Copy link, and paste that link: the app downloads that whole album.")
+    if site == "web" and ("unsupported url" in d or "no suitable extractor" in d
+                          or "no video formats" in d):
+        return ("Nothing to download was found on this page. The site may not be "
+                "supported, or the video is DRM-protected.")
+    if site == "web" and "drm" in d:
+        return "This video is DRM-protected, so it can't be downloaded."
     if site == "youtube" and ("sign in to confirm" in d or "not a bot" in d):
         return "YouTube asked to confirm you're not a bot. Try again later or on another network."
     if site == "youtube" and ("private video" in d or "members-only" in d or "join this channel" in d):
@@ -272,10 +278,17 @@ class Job:
         self.save(status=f"{self.prefix}Getting the list from {SITE.get(self.spec['site'], 'the site')}… "
                          "big profiles can take a few minutes")
 
-        if self.spec["site"] == "youtube":
+        use_gallery = True
+        if self.spec["site"] in ("youtube", "web"):
             import ytjob
             rc, result = ytjob.run(self)
-        else:
+            use_gallery = False
+            if (self.spec["site"] == "web" and result == "error" and self.count == 0
+                    and not self.cancelled() and self.spec.get("args")):
+                self.log("No video found on this page; looking for images…")
+                self.last_error = ""
+                use_gallery = True
+        if use_gallery:
             rc, result = 1, "error"
             import gallery_dl
             import snapext
