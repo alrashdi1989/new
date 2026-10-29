@@ -27,6 +27,11 @@ def paths(status_dir):
             os.path.join(status_dir, "cancel"))
 
 
+def files_path(status_dir):
+    """List of full paths saved during the current download (one per line)."""
+    return os.path.join(status_dir, "job.files")
+
+
 def read_status(status_dir):
     try:
         with open(paths(status_dir)[0], encoding="utf-8") as f:
@@ -194,6 +199,13 @@ class Job:
                 json.dump(self.state, f)
             os.replace(tmp, self.status_path)
 
+    def record_file(self, path):
+        try:
+            with open(files_path(self.spec["status_dir"]), "a", encoding="utf-8") as f:
+                f.write(path + "\n")
+        except OSError:
+            pass
+
     def log(self, line):
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
@@ -235,6 +247,7 @@ class Job:
             if len(self.new_files) >= 25:
                 self.flush_scan()
             self.log("+ " + os.path.basename(line))
+            self.record_file(line.strip())
             self.save(count=self.count, total=self.total, seen=len(self.posts),
                       status=self.progress_text())
             if time.time() - self._last_notify > 2:
@@ -268,6 +281,7 @@ class Job:
         first, n = self.pos[0] == 1, self.pos[1]
         if first:
             open(self.log_path, "w").close()
+            open(files_path(self.spec["status_dir"]), "w").close()
         if n > 1:
             self.log(("" if first else "\n") + f"── {self.prefix}{SITE.get(self.spec['site'], '')} @{self.spec['user']} ──")
         self.save(state="running", count=0, total=0, seen=0,

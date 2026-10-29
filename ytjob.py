@@ -169,6 +169,7 @@ def run(job):
         job.count += 1
         job.new_files.append(path)
         job.log("+ " + os.path.basename(path))
+        job.record_file(path)
         job.save(count=job.count, total=job.total, seen=len(job.posts),
                  status=job.progress_text())
         job.notify(f"{job.prefix}{yt.get('name', 'YouTube')}: {job.count} downloaded")

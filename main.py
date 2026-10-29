@@ -19,8 +19,10 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.storage.jsonstore import JsonStore
 from kivy.lang import Builder
-from kivy.properties import BooleanProperty, ListProperty, NumericProperty
+from kivy.properties import BooleanProperty, ListProperty, NumericProperty, StringProperty
+from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.button import Button
+from kivy.uix.image import Image
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout  # noqa: F401 (used in KV)
 from kivy.uix.modalview import ModalView
@@ -35,7 +37,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.1"
+APP_VERSION = "4.2"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -381,6 +383,76 @@ def media_scan_folder(root):
     return len(found)
 
 
+VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".3gp", ".ts")
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp")
+
+
+def make_thumb(path, out_jpg, size=200):
+    """Write a small JPEG preview of a photo or video. Returns True on success."""
+    is_video = path.lower().endswith(VIDEO_EXTS)
+    if platform == "android":
+        try:
+            from jnius import autoclass  # type: ignore
+            File = autoclass("java.io.File")
+            TU = autoclass("android.media.ThumbnailUtils")
+            Bitmap = autoclass("android.graphics.Bitmap")
+            CompressFormat = autoclass("android.graphics.Bitmap$CompressFormat")
+            FileOutputStream = autoclass("java.io.FileOutputStream")
+            if sdk_int() >= 29:
+                Size = autoclass("android.util.Size")
+                bmp = (TU.createVideoThumbnail(File(path), Size(size, size), None) if is_video
+                       else TU.createImageThumbnail(File(path), Size(size, size), None))
+            else:
+                if not is_video:
+                    return False
+                MINI = autoclass("android.provider.MediaStore$Images$Thumbnails").MINI_KIND
+                bmp = TU.createVideoThumbnail(path, MINI)
+            if bmp is None:
+                return False
+            fos = FileOutputStream(out_jpg)
+            bmp.compress(CompressFormat.JPEG, 80, fos)
+            fos.close()
+            return True
+        except Exception:
+            return False
+    try:                                   # desktop: Pillow, PyAV for videos
+        from PIL import Image as PILImage
+        if is_video:
+            import av
+            with av.open(path) as c:
+                frame = next(c.decode(video=0))
+                img = frame.to_image()
+        else:
+            img = PILImage.open(path)
+        img.thumbnail((size, size))
+        img.convert("RGB").save(out_jpg, "JPEG", quality=80)
+        return True
+    except Exception:
+        return False
+
+
+def open_file(path):
+    """Open a downloaded file in the phone's viewer/player."""
+    if platform != "android":
+        return False
+    from jnius import autoclass, cast  # type: ignore
+    Intent = autoclass("android.content.Intent")
+    Uri = autoclass("android.net.Uri")
+    File = autoclass("java.io.File")
+    StrictMode = autoclass("android.os.StrictMode")
+    VmPolicyBuilder = autoclass("android.os.StrictMode$VmPolicy$Builder")
+    StrictMode.setVmPolicy(VmPolicyBuilder().build())     # allow a plain file:// link
+    ext = os.path.splitext(path)[1].lower()
+    mime = ("video/*" if ext in VIDEO_EXTS else "audio/*" if ext in (".m4a", ".mp3", ".opus")
+            else "image/*")
+    intent = Intent(Intent.ACTION_VIEW)
+    intent.setDataAndType(Uri.fromFile(File(path)), mime)
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    act = autoclass("org.kivy.android.PythonActivity").mActivity
+    act.startActivity(intent)
+    return True
+
+
 def start_service(spec):
     from jnius import autoclass  # type: ignore
     import json
@@ -592,6 +664,33 @@ KV = """
         Line:
             points: [self.x + dp(26), self.top - dp(1.5), self.right - dp(26), self.top - dp(1.5)]
             width: dp(1)
+
+<Thumb>:
+    size_hint: None, None
+    size: dp(88), dp(88)
+    fit_mode: "cover"
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, .08
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
+    canvas.after:
+        Color:
+            rgba: 1, 1, 1, .25
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(12))
+            width: dp(1)
+        Color:
+            rgba: (0, 0, 0, .45) if self.video else (0, 0, 0, 0)
+        Ellipse:
+            pos: self.center_x - dp(15), self.center_y - dp(15)
+            size: dp(30), dp(30)
+        Color:
+            rgba: (1, 1, 1, .95) if self.video else (0, 0, 0, 0)
+        Triangle:
+            points: [self.center_x - dp(5), self.center_y - dp(8), self.center_x - dp(5), self.center_y + dp(8), self.center_x + dp(9), self.center_y]
 
 <SiteBadge@Label>:
     badge: 0.3, 0.3, 0.35, 1
@@ -967,7 +1066,7 @@ KV = """
                         on_release: root.start()
                 GlassCard:
                     size_hint_y: None
-                    height: dp(300)
+                    height: dp(300) + (dp(100) if root.thumb_count else 0)
                     spacing: dp(8)
                     BoxLayout:
                         size_hint_y: None
@@ -1016,6 +1115,20 @@ KV = """
                                 size: self.width * max(0, min(1, root.progress)), self.height
                                 radius: [dp(3)]
                     ScrollView:
+                        id: thumb_scroll
+                        do_scroll_y: False
+                        size_hint_y: None
+                        height: dp(92) if root.thumb_count else 0
+                        opacity: 1 if root.thumb_count else 0
+                        bar_width: dp(2)
+                        bar_color: 1, 1, 1, .3
+                        BoxLayout:
+                            id: thumbs
+                            size_hint_x: None
+                            width: self.minimum_width
+                            spacing: dp(8)
+                            padding: [0, dp(2)]
+                    ScrollView:
                         id: scroll
                         bar_color: 1, 1, 1, .3
                         bar_width: dp(3)
@@ -1037,6 +1150,18 @@ class AccessPopup(ModalView):
     def allow(self):
         self.dismiss()
         request_file_access()
+
+
+class Thumb(ButtonBehavior, Image):
+    path = StringProperty("")
+    video = BooleanProperty(False)
+
+    def on_release(self):
+        try:
+            if not open_file(self.path):
+                App.get_running_app().root_widget.set_status(os.path.basename(self.path))
+        except Exception as e:
+            App.get_running_app().root_widget.set_status(f"Couldn't open the file: {e}")
 
 
 class GlassInput(TextInput):
@@ -1071,6 +1196,7 @@ class Root(FloatLayout):
     busy = BooleanProperty(False)
     progress = NumericProperty(-1)
     link_count = NumericProperty(0)
+    thumb_count = NumericProperty(0)
 
     def __init__(self, store, **kw):
         super().__init__(**kw)
@@ -1378,7 +1504,7 @@ class Root(FloatLayout):
         spec = {"jobs": jobs, "status_dir": self.status_dir}
         site, user = links[0][0], links[0][1]
         os.makedirs(self.status_dir, exist_ok=True)
-        for f in engine.paths(self.status_dir):
+        for f in engine.paths(self.status_dir) + (engine.files_path(self.status_dir),):
             try:
                 os.remove(f)
             except OSError:
@@ -1386,6 +1512,7 @@ class Root(FloatLayout):
 
         self.log.text = ""
         self._log_pos = 0
+        self.clear_thumbs()
         self.progress = -1
         self.busy = True
         self.set_status((f"Downloading from {user}…" if site == "web"
@@ -1418,9 +1545,58 @@ class Root(FloatLayout):
             self.set_state(BUSY)
             self._log_pos = 0
             self.log.text = ""
+            self.clear_thumbs()
             self._watch_job()
 
+    MAX_THUMBS = 30
+
+    def clear_thumbs(self):
+        self.ids.thumbs.clear_widgets()
+        self.thumb_count = 0
+        self._files_pos = 0
+
+    def _poll_files(self):
+        try:
+            with open(engine.files_path(self.status_dir), encoding="utf-8") as f:
+                f.seek(getattr(self, "_files_pos", 0))
+                chunk = f.read()
+                self._files_pos = f.tell()
+        except OSError:
+            return
+        paths = [p for p in chunk.splitlines() if p.strip()]
+        for p in paths[-self.MAX_THUMBS:]:
+            if p.lower().endswith(VIDEO_EXTS + IMAGE_EXTS):
+                tile = self._add_thumb(p)          # placeholder now, keeps download order
+                threading.Thread(target=self._thumb_worker, args=(p, tile), daemon=True).start()
+
+    def _thumb_worker(self, path, tile):
+        cache = os.path.join(App.get_running_app().user_data_dir, "thumbs")
+        os.makedirs(cache, exist_ok=True)
+        import hashlib
+        out = os.path.join(cache, hashlib.md5(path.encode("utf-8")).hexdigest() + ".jpg")
+        ok = os.path.exists(out) or make_thumb(path, out)
+        if platform == "android":
+            try:
+                from jnius import detach  # type: ignore
+                detach()
+            except Exception:
+                pass
+        src = out if ok else (path if path.lower().endswith(IMAGE_EXTS) else "")
+        if src:
+            Clock.schedule_once(lambda *_: setattr(tile, "source", src))
+
+    def _add_thumb(self, path):
+        box = self.ids.thumbs
+        t = Thumb(path=path, video=path.lower().endswith(VIDEO_EXTS))
+        box.add_widget(t, index=len(box.children))   # newest on the left
+        while len(box.children) > self.MAX_THUMBS:
+            box.remove_widget(box.children[0])
+        self.thumb_count = len(box.children)
+        self.ids.thumb_scroll.scroll_x = 0
+        return t
+
     def _poll_job(self, *_):
+        self._poll_files()
         st = engine.read_status(self.status_dir)
         _, log_path, _ = engine.paths(self.status_dir)
         try:
