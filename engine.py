@@ -182,6 +182,7 @@ class Job:
         self.total = 0
         self.last_error = ""
         self.posts = set()
+        self.story_items = []        # story files of this run, in order (new + already saved)
         self.state = {"state": "running", "count": 0, "site": spec["site"],
                       "user": spec["user"], "out": spec["out"],
                       "started": time.time(), "beat": time.time(),
@@ -199,7 +200,61 @@ class Job:
                 json.dump(self.state, f)
             os.replace(tmp, self.status_path)
 
+    def _note_story(self, path):
+        if os.path.basename(os.path.dirname(path)).lower() not in ("story", "stories"):
+            return
+        if not os.path.exists(path):
+            # saved under its real type (e.g. .png) while the name said .jpg
+            stem = os.path.splitext(path)[0]
+            folder = os.path.dirname(path)
+            try:
+                match = next((os.path.join(folder, f) for f in sorted(os.listdir(folder))
+                              if os.path.splitext(os.path.join(folder, f))[0] == stem), None)
+            except OSError:
+                match = None
+            path = match or path
+        if path not in self.story_items:
+            self.story_items.append(path)
+
+    def join_stories(self):
+        groups = {}
+        for p in self.story_items:
+            groups.setdefault(os.path.dirname(p), []).append(p)
+        for folder, files in groups.items():
+            if len(files) < 2:
+                continue
+            marker = os.path.join(folder, ".story-video")
+            key = "\n".join(os.path.basename(f) for f in files)
+            try:
+                with open(marker, encoding="utf-8") as fh:
+                    if fh.read() == key:
+                        self.log("Story video already made for these parts")
+                        continue
+            except OSError:
+                pass
+            self.save(status=f"{self.prefix}Making the story video from {len(files)} parts…")
+            self.notify(f"{self.prefix}Making @{self.spec['user']}'s story video…")
+            name = f"{self.spec['user']} story {time.strftime('%Y-%m-%d %H_%M_%S')}.mp4"
+            out = os.path.join(os.path.dirname(folder), name)
+            try:
+                import storyjoin
+                n = storyjoin.join_story(files, out, log=self.log)
+            except Exception as e:
+                self.log(f"Couldn't make the story video ({e}); the separate parts are saved")
+                continue
+            if n:
+                try:
+                    with open(marker, "w", encoding="utf-8") as fh:
+                        fh.write(key)
+                except OSError:
+                    pass
+                self.count += 1
+                self.log(f"+ {name}  (story video from {n} parts)")
+                self.record_file(out)
+                self.new_files.append(out)
+
     def record_file(self, path):
+        self._note_story(path)
         try:
             with open(files_path(self.spec["status_dir"]), "a", encoding="utf-8") as f:
                 f.write(path + "\n")
@@ -241,6 +296,7 @@ class Job:
             return
         if line.startswith("#"):
             self.log("skip " + os.path.basename(line[1:].strip()))
+            self._note_story(line[1:].strip())
         elif not line.startswith("[") and os.sep in line:
             self.count += 1
             self.new_files.append(line.strip())
@@ -364,6 +420,9 @@ class Job:
         if (result == "done" and self.spec["site"] == "facebook" and self.count == 0
                 and "photo list" in self.last_error.lower()):
             result = "error"
+
+        if self.spec.get("join_stories") and result != "cancelled" and not self.cancelled():
+            self.join_stories()
 
         self.flush_scan()
         try:

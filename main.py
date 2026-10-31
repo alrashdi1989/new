@@ -37,7 +37,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.2"
+APP_VERSION = "4.3"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -197,8 +197,7 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
         "-o", "path-strip=windows",
         "-o", ('directory=["{section}"]' if site == "snapchat" else
                'directory=["{subcategory!c}"]' if (site == "tiktok" and url.endswith("/posts")
-                                                   and "stories" in content
-                                                   and "posts" in content) else
+                                                   and "stories" in content) else
                'directory=["{subcategory!c}"]' if site == "instagram" and is_ig_profile(url) else
                "directory=[]"),
         "--filter", f"extension in {exts!r}",
@@ -1055,6 +1054,13 @@ KV = """
                             font_size: "13sp"
                             state: "down"
                             on_state: root.save_content()
+                    Chip:
+                        id: c_join
+                        text: "Stories as one video (keeps the parts too)"
+                        font_size: "13sp"
+                        size_hint_y: None
+                        height: dp(40)
+                        on_state: root.save_content()
                     Widget:
                         size_hint_y: None
                         height: dp(2)
@@ -1272,7 +1278,7 @@ class Root(FloatLayout):
             self.set_status(f"Couldn't copy the log: {e}")
 
     CONTENT_IDS = {"stories": "c_story", "highlights": "c_high", "posts": "c_posts",
-                   "spotlight": "c_spot"}
+                   "spotlight": "c_spot", "join": "c_join"}
 
     def content(self):
         return {k for k, i in self.CONTENT_IDS.items() if self.ids[i].state == "down"}
@@ -1500,6 +1506,7 @@ class Root(FloatLayout):
                                    content),
                 "out": out, "out_label": pretty_path(out), "site": site, "user": user,
                 "status_dir": self.status_dir,
+                "join_stories": "join" in content and "stories" in content,
             })
         spec = {"jobs": jobs, "status_dir": self.status_dir}
         site, user = links[0][0], links[0][1]

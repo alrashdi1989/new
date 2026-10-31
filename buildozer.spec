@@ -4,8 +4,9 @@ package.name = xmediadownloader
 package.domain = org.personal
 source.dir = .
 source.include_exts = py,png,jpg,kv,json
-version = 4.2
-requirements = python3,kivy,android,pyjnius,sqlite3,openssl,requests,urllib3,certifi,charset-normalizer,idna,gallery-dl,yt-dlp,av
+source.exclude_dirs = recipes,bin,out,.github
+version = 4.3
+requirements = python3,kivy,android,pyjnius,sqlite3,openssl,requests,urllib3,certifi,charset-normalizer,idna,gallery-dl,yt-dlp,av,ffpyplayer_codecs
 orientation = portrait
 services = Downloader:service.py:foreground
 fullscreen = 0
@@ -20,6 +21,7 @@ android.archs = arm64-v8a
 android.ndk = 25b
 android.accept_sdk_license = True
 p4a.branch = v2024.01.21
+p4a.local_recipes = ./recipes
 android.allow_backup = True
 
 [buildozer]

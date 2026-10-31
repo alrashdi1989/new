@@ -112,3 +112,11 @@ Paste a link from any site. The app first looks for a video (yt-dlp supports
 1000+ sites and videos embedded in ordinary pages), then for images (gallery-dl).
 Files go to `Web/<site>/`. DRM-protected services (Netflix, Disney+, Spotify…)
 can't be downloaded.
+
+## Stories as one video
+
+Turn on **Stories as one video** under *From profiles* (with **Stories** on).
+After downloading a Snapchat, Instagram or TikTok story, the app joins its
+photos (5 s each) and videos into `<name> story <date>.mp4` (720x1280, 30 fps,
+H.264 + AAC) next to the Story folder. The separate parts are kept. A new video
+is only made when the story has changed.
