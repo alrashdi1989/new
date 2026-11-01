@@ -23,7 +23,9 @@ from kivy.properties import BooleanProperty, ListProperty, NumericProperty, Stri
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.button import Button
 from kivy.uix.image import Image
+from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.label import Label
 from kivy.uix.gridlayout import GridLayout  # noqa: F401 (used in KV)
 from kivy.uix.modalview import ModalView
 from kivy.uix.textinput import TextInput
@@ -37,7 +39,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.3"
+APP_VERSION = "4.4"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -450,6 +452,28 @@ def open_file(path):
     act = autoclass("org.kivy.android.PythonActivity").mActivity
     act.startActivity(intent)
     return True
+
+
+BADGES = {
+    "x": ("X", (0.13, 0.14, 0.17, 1), (1, 1, 1, 1)),
+    "tiktok": ("TT", (0.93, 0.22, 0.42, 1), (1, 1, 1, 1)),
+    "instagram": ("IG", (0.72, 0.25, 0.68, 1), (1, 1, 1, 1)),
+    "facebook": ("FB", (0.15, 0.45, 0.93, 1), (1, 1, 1, 1)),
+    "snapchat": ("SC", (1.0, 0.86, 0.15, 1), (0.1, 0.1, 0.1, 1)),
+    "youtube": ("YT", (0.86, 0.16, 0.16, 1), (1, 1, 1, 1)),
+    "web": ("WEB", (0.35, 0.38, 0.45, 1), (1, 1, 1, 1)),
+}
+
+
+def favorite_link(site, name, url):
+    """A link that, pasted again, means the same whole profile."""
+    if site == "x" and url.endswith("/media"):
+        return f"https://x.com/{name}"
+    if site == "tiktok" and url.endswith("/posts"):
+        return f"https://www.tiktok.com/@{name}"
+    if site == "snapchat" and url.startswith("snapfull:"):
+        return f"https://www.snapchat.com/add/{name}"
+    return url
 
 
 def start_service(spec):
@@ -870,7 +894,7 @@ KV = """
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "X, TikTok, Snapchat, IG, FB, YouTube & more"
+                    text: "Save from X, TikTok, Snapchat & more"
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
@@ -893,7 +917,7 @@ KV = """
                     GlassInput:
                         id: url
                         multiline: True
-                        hint_text: "Paste links from any site (one per line)"
+                        hint_text: "Paste links (one per line)"
                         height: min(max(dp(50), self.minimum_height), dp(170))
                         on_text: root.update_link_count()
                     BoxLayout:
@@ -906,11 +930,44 @@ KV = """
                         GhostButton:
                             text: "Clear"
                             on_release: root.clear_links()
+                        GhostButton:
+                            text: "Save"
+                            on_release: root.save_favorites()
                         Label:
                             text: ("%d links" % root.link_count) if root.link_count != 1 else "1 link"
-                            font_size: "13sp"
+                            font_size: "12sp"
                             color: 1, 1, 1, .6
-                            size_hint_x: .8
+                            size_hint_x: .6
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(30)
+                        Caption:
+                            text: "FAVORITES"
+                            size_hint_y: 1
+                            valign: "middle"
+                        GhostButton:
+                            text: "Get new from all"
+                            font_size: "12sp"
+                            size_hint_x: None
+                            width: dp(140)
+                            opacity: 1 if root.fav_count else 0
+                            disabled: not root.fav_count
+                            on_release: root.download_favorites()
+                    Label:
+                        text: "Save profiles here to get their new posts with one tap."
+                        font_size: "12sp"
+                        color: 1, 1, 1, .45
+                        size_hint_y: None
+                        height: 0 if root.fav_count else dp(22)
+                        opacity: 0 if root.fav_count else 1
+                        text_size: self.width, None
+                        halign: "left"
+                    BoxLayout:
+                        id: favs
+                        orientation: "vertical"
+                        size_hint_y: None
+                        height: self.minimum_height
+                        spacing: dp(6)
                     Caption:
                         text: "X ACCOUNT"
                     BoxLayout:
@@ -1203,6 +1260,7 @@ class Root(FloatLayout):
     progress = NumericProperty(-1)
     link_count = NumericProperty(0)
     thumb_count = NumericProperty(0)
+    fav_count = NumericProperty(0)
 
     def __init__(self, store, **kw):
         super().__init__(**kw)
@@ -1224,6 +1282,7 @@ class Root(FloatLayout):
                 self.ids[state_id].text = "Signed in"
                 self.ids[btn_id].text = "Sign out"
         self.restore_content()
+        self.refresh_favorites()
         self._job_poll = None
         self._log_pos = 0
         self.save_dir = store.get("folder")["path"] if store.exists("folder") else download_root()
@@ -1296,6 +1355,78 @@ class Root(FloatLayout):
         for k, i in self.CONTENT_IDS.items():
             self.ids[i].state = "down" if k in picked else "normal"
         self._restoring = False
+
+    # ---- favorites ----
+    def _favorites(self):
+        return list(self.store.get("favorites")["items"]) if self.store.exists("favorites") else []
+
+    def save_favorites(self):
+        links, _ = parse_links(self.url.text)
+        if not links:
+            self.set_status("Paste a profile link first, then tap Save.")
+            return
+        favs = self._favorites()
+        have = {f["link"] for f in favs}
+        added = 0
+        for site, name, url in links:
+            link = favorite_link(site, name, url)
+            if link in have:
+                continue
+            label = name if name not in ("videos", "photos", "posts", "shared", "playlist",
+                                         "albums", "highlights") else link.split("//")[-1][:40]
+            favs.append({"site": site, "name": label, "link": link})
+            have.add(link)
+            added += 1
+        self.store.put("favorites", items=favs)
+        self.refresh_favorites()
+        self.set_status(f"Saved {added} to favorites." if added else "Already in your favorites.")
+        self.set_state(OK if added else IDLE)
+
+    def remove_favorite(self, link):
+        favs = [f for f in self._favorites() if f["link"] != link]
+        self.store.put("favorites", items=favs)
+        self.refresh_favorites()
+        self.set_status("Removed from favorites.")
+
+    def download_favorite(self, link):
+        if self.busy:
+            self.set_status("A download is running. Wait for it to finish, or tap Stop first.")
+            return
+        self.start(text=link)
+
+    def download_favorites(self):
+        favs = self._favorites()
+        if not favs:
+            return
+        if self.busy:
+            self.set_status("A download is running. Wait for it to finish, or tap Stop first.")
+            return
+        self.start(text="\n".join(f["link"] for f in favs))
+
+    def refresh_favorites(self):
+        from kivy.factory import Factory
+        box = self.ids.favs
+        box.clear_widgets()
+        favs = self._favorites()
+        for f in favs:
+            text, bg, ink = BADGES.get(f["site"], BADGES["web"])
+            row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
+            badge = Factory.SiteBadge(text=text, badge=bg, ink=ink)
+            badge.size = (dp(36), dp(36))
+            badge.font_size = "11sp"
+            row.add_widget(badge)
+            name = Label(text=f["name"], halign="left", valign="middle", font_size="14sp",
+                         shorten=True, shorten_from="right")
+            name.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
+            row.add_widget(name)
+            get = GhostButton(text="Get new", size_hint_x=None, width=dp(78), font_size="13sp")
+            get.bind(on_release=lambda _b, link=f["link"]: self.download_favorite(link))
+            row.add_widget(get)
+            rm = GhostButton(text="×", size_hint_x=None, width=dp(36), font_size="18sp")
+            rm.bind(on_release=lambda _b, link=f["link"]: self.remove_favorite(link))
+            row.add_widget(rm)
+            box.add_widget(row)
+        self.fav_count = len(favs)
 
     def update_link_count(self):
         self.link_count = len(parse_links(self.url.text)[0])
@@ -1445,12 +1576,12 @@ class Root(FloatLayout):
     def status_dir(self):
         return os.path.join(App.get_running_app().user_data_dir, "job")
 
-    def start(self):
+    def start(self, text=None):
         if self.busy:
             engine.request_cancel(self.status_dir)
             self.set_status("Stopping…")
             return
-        links, bad = parse_links(self.url.text)
+        links, bad = parse_links(self.url.text if text is None else text)
         if not links:
             self.set_status("Paste a link (X, TikTok, Snapchat, Instagram, Facebook, YouTube or any website).")
             self.set_state(ERR)

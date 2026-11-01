@@ -120,3 +120,10 @@ After downloading a Snapchat, Instagram or TikTok story, the app joins its
 photos (5 s each) and videos into `<name> story <date>.mp4` (720x1280, 30 fps,
 H.264 + AAC) next to the Story folder. The separate parts are kept. A new video
 is only made when the story has changed.
+
+## Favorites
+
+Paste profile links and tap **Save** to keep them under **Favorites**. Tap
+**Get new** next to a profile (or **Get new from all**) to download only what's
+new since last time — already-downloaded posts are skipped automatically.
+Tap **×** to remove a favorite.
