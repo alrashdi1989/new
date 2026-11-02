@@ -126,4 +126,4 @@ is only made when the story has changed.
 Paste profile links and tap **Save** to keep them under **Favorites**. Tap
 **Get new** next to a profile (or **Get new from all**) to download only what's
 new since last time — already-downloaded posts are skipped automatically.
-Tap **×** to remove a favorite.
+Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name or **+ / –** to expand or collapse it, and **Get new** on a group header to update that whole group.

@@ -39,7 +39,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.4"
+APP_VERSION = "4.5"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -1215,6 +1215,10 @@ class AccessPopup(ModalView):
         request_file_access()
 
 
+class TapLabel(ButtonBehavior, Label):
+    pass
+
+
 class Thumb(ButtonBehavior, Image):
     path = StringProperty("")
     video = BooleanProperty(False)
@@ -1403,29 +1407,80 @@ class Root(FloatLayout):
             return
         self.start(text="\n".join(f["link"] for f in favs))
 
+    GROUP_ORDER = [("snapchat", "Snapchat"), ("instagram", "Instagram"), ("tiktok", "TikTok"),
+                   ("youtube", "YouTube"), ("x", "X"), ("facebook", "Facebook"),
+                   ("web", "Websites")]
+
+    def _collapsed(self):
+        return set(self.store.get("fav_groups")["collapsed"]) if self.store.exists("fav_groups") else set()
+
+    def toggle_group(self, site):
+        c = self._collapsed()
+        c.symmetric_difference_update({site})
+        self.store.put("fav_groups", collapsed=sorted(c))
+        self.refresh_favorites()
+
+    def download_group(self, site):
+        links = [f["link"] for f in self._favorites() if f["site"] == site]
+        if not links:
+            return
+        if self.busy:
+            self.set_status("A download is running. Wait for it to finish, or tap Stop first.")
+            return
+        self.start(text="\n".join(links))
+
     def refresh_favorites(self):
         from kivy.factory import Factory
         box = self.ids.favs
         box.clear_widgets()
         favs = self._favorites()
-        for f in favs:
-            text, bg, ink = BADGES.get(f["site"], BADGES["web"])
-            row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
+        collapsed = self._collapsed()
+        known = {k for k, _ in self.GROUP_ORDER}
+        for site, title in self.GROUP_ORDER:
+            members = [f for f in favs if (f["site"] if f["site"] in known else "web") == site]
+            if not members:
+                continue
+            open_ = site not in collapsed
+            text, bg, ink = BADGES.get(site, BADGES["web"])
+
+            # ---- group header
+            head = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
             badge = Factory.SiteBadge(text=text, badge=bg, ink=ink)
             badge.size = (dp(36), dp(36))
             badge.font_size = "11sp"
-            row.add_widget(badge)
-            name = Label(text=f["name"], halign="left", valign="middle", font_size="14sp",
-                         shorten=True, shorten_from="right")
+            head.add_widget(badge)
+            name = TapLabel(text=f"[b]{title}[/b] ({len(members)})", markup=True,
+                            halign="left", valign="middle", font_size="14sp",
+                            shorten=True, shorten_from="right")
             name.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-            row.add_widget(name)
+            name.bind(on_release=lambda _w, s=site: self.toggle_group(s))
+            head.add_widget(name)
             get = GhostButton(text="Get new", size_hint_x=None, width=dp(78), font_size="13sp")
-            get.bind(on_release=lambda _b, link=f["link"]: self.download_favorite(link))
-            row.add_widget(get)
-            rm = GhostButton(text="×", size_hint_x=None, width=dp(36), font_size="18sp")
-            rm.bind(on_release=lambda _b, link=f["link"]: self.remove_favorite(link))
-            row.add_widget(rm)
-            box.add_widget(row)
+            get.bind(on_release=lambda _b, s=site: self.download_group(s))
+            head.add_widget(get)
+            tog = GhostButton(text="–" if open_ else "+", size_hint_x=None, width=dp(36),
+                              font_size="20sp")
+            tog.bind(on_release=lambda _b, s=site: self.toggle_group(s))
+            head.add_widget(tog)
+            box.add_widget(head)
+            if not open_:
+                continue
+
+            # ---- profiles in the group (indented)
+            for f in members:
+                row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(8),
+                                padding=[dp(44), 0, 0, 0])
+                label = Label(text=f["name"], halign="left", valign="middle", font_size="14sp",
+                              color=(1, 1, 1, .9), shorten=True, shorten_from="right")
+                label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
+                row.add_widget(label)
+                g = GhostButton(text="Get new", size_hint_x=None, width=dp(78), font_size="12sp")
+                g.bind(on_release=lambda _b, link=f["link"]: self.download_favorite(link))
+                row.add_widget(g)
+                rm = GhostButton(text="×", size_hint_x=None, width=dp(36), font_size="18sp")
+                rm.bind(on_release=lambda _b, link=f["link"]: self.remove_favorite(link))
+                row.add_widget(rm)
+                box.add_widget(row)
         self.fav_count = len(favs)
 
     def update_link_count(self):
