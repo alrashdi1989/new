@@ -19,7 +19,8 @@ from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.storage.jsonstore import JsonStore
 from kivy.lang import Builder
-from kivy.properties import BooleanProperty, ListProperty, NumericProperty, StringProperty
+from kivy.properties import (BooleanProperty, ListProperty, NumericProperty, ObjectProperty,
+                             StringProperty)
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.button import Button
 from kivy.uix.image import Image
@@ -39,7 +40,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.5"
+APP_VERSION = "4.6"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -688,6 +689,27 @@ KV = """
             points: [self.x + dp(26), self.top - dp(1.5), self.right - dp(26), self.top - dp(1.5)]
             width: dp(1)
 
+<Avatar>:
+    size_hint: None, None
+    size: dp(32), dp(32)
+    pos_hint: {"center_y": .5}
+    font_size: "14sp"
+    bold: True
+    color: 1, 1, 1, .85
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, .14
+        Ellipse:
+            pos: self.pos
+            size: self.size
+    canvas.after:
+        Color:
+            rgba: (1, 1, 1, 1) if self.photo else (0, 0, 0, 0)
+        Ellipse:
+            pos: self.pos
+            size: self.size
+            texture: self.photo
+
 <Thumb>:
     size_hint: None, None
     size: dp(88), dp(88)
@@ -1215,6 +1237,18 @@ class AccessPopup(ModalView):
         request_file_access()
 
 
+class Avatar(Label):
+    photo = ObjectProperty(None, allownone=True)
+    source = StringProperty("")
+
+    def on_source(self, *_):
+        try:
+            from kivy.core.image import Image as CoreImage
+            self.photo = CoreImage(self.source, nocache=True).texture if self.source else None
+        except Exception:
+            self.photo = None
+
+
 class TapLabel(ButtonBehavior, Label):
     pass
 
@@ -1286,6 +1320,8 @@ class Root(FloatLayout):
                 self.ids[state_id].text = "Signed in"
                 self.ids[btn_id].text = "Sign out"
         self.restore_content()
+        self._avatar_widgets = {}
+        self._avatar_failed = set()
         self.refresh_favorites()
         self._job_poll = None
         self._log_pos = 0
@@ -1429,10 +1465,67 @@ class Root(FloatLayout):
             return
         self.start(text="\n".join(links))
 
+    # ---- profile photos for favorites ----
+    def _avatar_path(self, link):
+        import hashlib
+        d = os.path.join(App.get_running_app().user_data_dir, "avatars")
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, hashlib.md5(link.encode("utf-8")).hexdigest() + ".jpg")
+
+    def _site_cookies(self, site):
+        if site == "x":
+            return {"auth_token": self.store.get("auth")["token"]} if self.store.exists("auth") else None
+        if site in ROW_IDS and self.store.exists(site):
+            return self.store.get(site)["cookies"]
+        return None
+
+    def fetch_avatars(self, *_):
+        """Fetch missing/old profile photos one at a time, only while idle."""
+        if getattr(self, "_avatar_thread", None) and self._avatar_thread.is_alive():
+            return
+        import avatars
+        todo = [f for f in self._favorites()
+                if f["site"] in ("x", "instagram", "tiktok", "snapchat", "facebook", "youtube")
+                and avatars.needs_refresh(self._avatar_path(f["link"]))
+                and f["link"] not in self._avatar_failed]
+        if not todo or self.busy:
+            return
+
+        def work():
+            for f in todo:
+                if self.busy:
+                    break
+                path = self._avatar_path(f["link"])
+                try:
+                    name = f["name"] if f["site"] != "facebook" else f["link"].split("/")[3]
+                    ok = avatars.fetch(f["site"], name, f["link"], path, self._site_cookies(f["site"]))
+                except Exception:
+                    ok = False
+                if ok:
+                    Clock.schedule_once(lambda *_, link=f["link"], p=path: self._show_avatar(link, p))
+                else:
+                    self._avatar_failed.add(f["link"])
+            if platform == "android":
+                try:
+                    from jnius import detach  # type: ignore
+                    detach()
+                except Exception:
+                    pass
+
+        self._avatar_thread = threading.Thread(target=work, daemon=True)
+        self._avatar_thread.start()
+
+    def _show_avatar(self, link, path):
+        w = self._avatar_widgets.get(link)
+        if w is not None:
+            w.source = ""
+            w.source = path
+
     def refresh_favorites(self):
         from kivy.factory import Factory
         box = self.ids.favs
         box.clear_widgets()
+        self._avatar_widgets = {}
         favs = self._favorites()
         collapsed = self._collapsed()
         known = {k for k, _ in self.GROUP_ORDER}
@@ -1468,8 +1561,14 @@ class Root(FloatLayout):
 
             # ---- profiles in the group (indented)
             for f in members:
-                row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(8),
-                                padding=[dp(44), 0, 0, 0])
+                row = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(10),
+                                padding=[dp(4), 0, 0, 0])
+                av = Avatar(text=(f["name"][:1] or "?").upper())
+                pic = self._avatar_path(f["link"])
+                if os.path.exists(pic):
+                    av.source = pic
+                self._avatar_widgets[f["link"]] = av
+                row.add_widget(av)
                 label = Label(text=f["name"], halign="left", valign="middle", font_size="14sp",
                               color=(1, 1, 1, .9), shorten=True, shorten_from="right")
                 label.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
@@ -1482,6 +1581,7 @@ class Root(FloatLayout):
                 row.add_widget(rm)
                 box.add_widget(row)
         self.fav_count = len(favs)
+        Clock.schedule_once(self.fetch_avatars, 1)
 
     def update_link_count(self):
         self.link_count = len(parse_links(self.url.text)[0])
@@ -1617,6 +1717,8 @@ class Root(FloatLayout):
                 self.ids[state_id].text = "Signed in"
                 self.ids[btn_id].text = "Sign out"
         Clock.schedule_once(_ok)
+        self._avatar_failed.clear()          # retry profile photos with the new login
+        Clock.schedule_once(self.fetch_avatars, 2)
         self.set_status(f"Logged in to {name}. Paste a link and tap Download.")
         self.set_state(OK)
 
@@ -1822,6 +1924,7 @@ class Root(FloatLayout):
             if self._job_poll is not None:
                 self._job_poll.cancel()
                 self._job_poll = None
+            Clock.schedule_once(self.fetch_avatars, 2)
 
 
 class XMediaApp(App):
