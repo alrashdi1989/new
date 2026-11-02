@@ -183,6 +183,7 @@ class Job:
         self.last_error = ""
         self.posts = set()
         self.story_items = []        # story files of this run, in order (new + already saved)
+        self.skipped = 0             # files already downloaded before
         self.state = {"state": "running", "count": 0, "site": spec["site"],
                       "user": spec["user"], "out": spec["out"],
                       "started": time.time(), "beat": time.time(),
@@ -295,7 +296,12 @@ class Job:
                     self.save(total=self.total, seen=len(self.posts), status=self.progress_text())
             return
         if line.startswith("#"):
-            self.log("skip " + os.path.basename(line[1:].strip()))
+            # list only the first few; a long list hides the useful lines in the log
+            self.skipped += 1
+            if self.skipped <= 3:
+                self.log("skip " + os.path.basename(line[1:].strip()))
+            elif self.skipped == 4:
+                self.log("skip … (more files you already have; not listed)")
             self._note_story(line[1:].strip())
         elif not line.startswith("[") and os.sep in line:
             self.count += 1
@@ -421,7 +427,12 @@ class Job:
                 and "photo list" in self.last_error.lower()):
             result = "error"
 
+        if self.skipped:
+            self.log(f"Already had {self.skipped} files, skipped them.")
         if self.spec.get("join_stories") and result != "cancelled" and not self.cancelled():
+            if len(self.story_items) < 2:
+                self.log(f"Story video: {'no' if not self.story_items else 'only 1'} story "
+                         "item found, nothing to join.")
             self.join_stories()
 
         self.flush_scan()

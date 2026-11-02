@@ -40,7 +40,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.9"
+APP_VERSION = "5.0"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -1402,7 +1402,22 @@ class Root(FloatLayout):
                 lines = f.read().splitlines()
         except OSError:
             lines = self.log.text.splitlines()
-        text = "\n".join([f"Media Downloader {APP_VERSION}", f"Status: {self.status.text}"] + lines[-200:])
+        # keep every meaningful line; only the file lists ("+ "/"skip ") are trimmed
+        lists = [i for i, l in enumerate(lines) if l.startswith(("+ ", "skip "))]
+        drop = set(lists[:-30])
+        lines = [l for i, l in enumerate(lines) if i not in drop]
+        if drop:
+            lines.insert(0, f"({len(drop)} file names not shown)")
+        try:
+            job = engine.read_status(self.status_dir) or {}
+        except Exception:
+            job = {}
+        head = [f"Media Downloader {APP_VERSION}", f"Status: {self.status.text}"]
+        if job.get("status"):
+            head.append(f"Last download: {job.get('state', '')} · {job['status']}")
+        text = "\n".join(head + lines)
+        if len(text) > 15000:                       # long pastes get cut off in chat
+            text = "\n".join(head) + "\n…\n" + text[-14000:]
         # never share login secrets
         text = re.sub(r"(auth_token|sessionid|c_user|xs|csrftoken|sid_tt|sid_guard|msToken)=\S+",
                       r"\1=<hidden>", text)
