@@ -40,7 +40,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "4.8"
+APP_VERSION = "4.9"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -456,13 +456,13 @@ def open_file(path):
 
 
 BADGES = {
-    "x": ("X", (0.13, 0.14, 0.17, 1), (1, 1, 1, 1)),
+    "x": ("X", (0.20, 0.21, 0.25, 1), (1, 1, 1, 1)),
     "tiktok": ("TT", (0.93, 0.22, 0.42, 1), (1, 1, 1, 1)),
     "instagram": ("IG", (0.72, 0.25, 0.68, 1), (1, 1, 1, 1)),
     "facebook": ("FB", (0.15, 0.45, 0.93, 1), (1, 1, 1, 1)),
-    "snapchat": ("SC", (1.0, 0.86, 0.15, 1), (0.1, 0.1, 0.1, 1)),
+    "snapchat": ("SC", (1.0, 0.84, 0.10, 1), (0.12, 0.10, 0.02, 1)),
     "youtube": ("YT", (0.86, 0.16, 0.16, 1), (1, 1, 1, 1)),
-    "web": ("WEB", (0.35, 0.38, 0.45, 1), (1, 1, 1, 1)),
+    "web": ("WEB", (0.38, 0.42, 0.50, 1), (1, 1, 1, 1)),
 }
 
 
@@ -737,9 +737,7 @@ KV = """
         Triangle:
             points: [self.center_x - dp(5), self.center_y - dp(8), self.center_x - dp(5), self.center_y + dp(8), self.center_x + dp(9), self.center_y]
 
-<SiteBadge@Label>:
-    badge: 0.3, 0.3, 0.35, 1
-    ink: 1, 1, 1, 1
+<SiteBadge>:
     size_hint: None, None
     size: dp(40), dp(40)
     pos_hint: {"center_y": .5}
@@ -748,10 +746,21 @@ KV = """
     color: self.ink
     canvas.before:
         Color:
-            rgba: self.badge
+            rgba: 1, 1, 1, 1
         Ellipse:
             pos: self.pos
             size: self.size
+            texture: self.grad
+        Color:
+            rgba: 1, 1, 1, .20
+        Ellipse:
+            pos: self.x + self.width * .2, self.y + self.height * .5
+            size: self.width * .6, self.height * .36
+        Color:
+            rgba: 1, 1, 1, .30
+        Line:
+            ellipse: (self.x + dp(.5), self.y + dp(.5), self.width - dp(1), self.height - dp(1))
+            width: dp(1)
 
 <Caption@Label>:
     size_hint_y: None
@@ -998,7 +1007,7 @@ KV = """
                         spacing: dp(8)
                         SiteBadge:
                             text: "X"
-                            badge: 0.13, 0.14, 0.17, 1
+                            badge: 0.20, 0.21, 0.25, 1
                             ink: 1, 1, 1, 1
                         GlassInput:
                             id: token
@@ -1235,6 +1244,34 @@ class AccessPopup(ModalView):
     def allow(self):
         self.dismiss()
         request_file_access()
+
+
+def _mix(c, t, amount):
+    return [c[i] + (t[i] - c[i]) * amount for i in range(3)] + [1]
+
+
+class SiteBadge(Label):
+    """Round badge with initials: a gradient in the app's colour family, plus a shine."""
+    badge = ListProperty([0.3, 0.3, 0.35, 1])
+    ink = ListProperty([1, 1, 1, 1])
+    grad = ObjectProperty(None, allownone=True)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.on_badge()
+
+    def on_badge(self, *_):
+        from kivy.graphics.texture import Texture
+        top = _mix(self.badge, (1, 1, 1), .28)       # lighter at the top
+        bottom = _mix(self.badge, (0, 0, 0), .30)    # deeper at the bottom
+        n = 64
+        buf = bytearray()
+        for i in range(n):                            # row 0 = bottom of the texture
+            t = i / (n - 1)
+            buf += bytes(int(255 * (bottom[k] + (top[k] - bottom[k]) * t)) for k in range(3)) + b"\xff"
+        tex = Texture.create(size=(1, n), colorfmt="rgba")
+        tex.blit_buffer(bytes(buf), colorfmt="rgba", bufferfmt="ubyte")
+        self.grad = tex
 
 
 class Avatar(Label):
