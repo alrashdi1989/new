@@ -14,6 +14,7 @@ import threading
 import time
 
 from kivy.app import App
+from kivy.utils import escape_markup
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
@@ -40,7 +41,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "5.0"
+APP_VERSION = "5.1"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -893,6 +894,52 @@ KV = """
             height: dp(46)
             on_release: root.dismiss()
 
+<ConfirmPopup>:
+    background: ""
+    background_color: 0, 0, 0, 0
+    overlay_color: 0, 0, 0, .6
+    size_hint: .88, None
+    height: ccard.height
+    auto_dismiss: True
+    GlassCard:
+        id: ccard
+        canvas.before:
+            Color:
+                rgba: .07, .09, .18, .98
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(24)]
+        padding: dp(22)
+        spacing: dp(14)
+        Label:
+            text: root.title
+            bold: True
+            font_size: "20sp"
+            size_hint_y: None
+            height: dp(30)
+            halign: "left"
+            text_size: self.size
+            shorten: True
+        Label:
+            text: root.message
+            markup: True
+            font_size: "14sp"
+            color: 1, 1, 1, .75
+            size_hint_y: None
+            text_size: self.width, None
+            height: self.texture_size[1]
+        BoxLayout:
+            size_hint_y: None
+            height: dp(50)
+            spacing: dp(12)
+            GhostButton:
+                text: "Cancel"
+                on_release: root.dismiss()
+            PrimaryButton:
+                text: root.ok_text
+                on_release: root.confirm()
+
 <Root>:
     Image:
         source: "bg.png"
@@ -1246,6 +1293,21 @@ class AccessPopup(ModalView):
         request_file_access()
 
 
+class ConfirmPopup(ModalView):
+    title = StringProperty("")
+    message = StringProperty("")
+    ok_text = StringProperty("OK")
+
+    def __init__(self, on_ok=None, **kw):
+        self._on_ok = on_ok
+        super().__init__(**kw)
+
+    def confirm(self):
+        self.dismiss()
+        if self._on_ok:
+            self._on_ok()
+
+
 def _mix(c, t, amount):
     return [c[i] + (t[i] - c[i]) * amount for i in range(3)] + [1]
 
@@ -1474,6 +1536,15 @@ class Root(FloatLayout):
         self.set_status(f"Saved {added} to favorites." if added else "Already in your favorites.")
         self.set_state(OK if added else IDLE)
 
+    def confirm_remove_favorite(self, fav):
+        site = SITE_NAMES.get(fav.get("site"), "")
+        where = f" ({site})" if site else ""
+        ConfirmPopup(title="Remove from favorites?",
+                     message=f"[b]{escape_markup(fav['name'])}[/b]{where} will be removed from "
+                             "your favorites. Files you already downloaded stay on your phone.",
+                     ok_text="Remove",
+                     on_ok=lambda: self.remove_favorite(fav["link"])).open()
+
     def remove_favorite(self, link):
         favs = [f for f in self._favorites() if f["link"] != link]
         self.store.put("favorites", items=favs)
@@ -1629,7 +1700,7 @@ class Root(FloatLayout):
                 g.bind(on_release=lambda _b, link=f["link"]: self.download_favorite(link))
                 row.add_widget(g)
                 rm = GhostButton(text="×", size_hint_x=None, width=dp(36), font_size="18sp")
-                rm.bind(on_release=lambda _b, link=f["link"]: self.remove_favorite(link))
+                rm.bind(on_release=lambda _b, f=f: self.confirm_remove_favorite(f))
                 row.add_widget(rm)
                 box.add_widget(row)
         self.fav_count = len(favs)
