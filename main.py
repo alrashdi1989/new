@@ -41,7 +41,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "5.1"
+APP_VERSION = "5.2"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -192,10 +192,14 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
                site_ua=None, content=None):
     content = set(content) if content is not None else {"stories", "highlights", "posts", "spotlight"}
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
+    if site == "facebook" and videos:
+        exts += ("m4a",)           # Facebook sends a video's sound as a separate file
     args = [
         "-d", out_dir,
         "--download-archive", os.path.join(out_dir, ".downloaded.sqlite3"),
-        "-o", "videos=true",
+        # Instagram: "merged" = the version with sound built in (the other kind needs
+        # a desktop video tool to join picture and sound, which phones don't have)
+        "-o", "videos=merged" if site == "instagram" else "videos=true",
         # Android's shared storage rejects : ? * " < > | \ in file names
         "-o", "path-restrict=windows",
         "-o", "path-strip=windows",
@@ -478,12 +482,32 @@ def favorite_link(site, name, url):
     return url
 
 
-def start_service(spec):
+def start_service(spec, lane=1):
     from jnius import autoclass  # type: ignore
     import json
     act = autoclass("org.kivy.android.PythonActivity").mActivity
-    svc = autoclass("org.personal.xmediadownloader.ServiceDownloader")
+    name = "ServiceDownloader" + ("" if lane == 1 else str(lane))
+    svc = autoclass("org.personal.xmediadownloader." + name)
     svc.start(act, json.dumps(spec))
+
+
+MAX_LANES = 3
+# desktop: each worker is its own process (the download engine keeps global settings)
+LANE_RUNNER = "import json, sys, engine; engine.run_queue(json.loads(sys.argv[1]))"
+
+
+def split_lanes(jobs, lanes):
+    """Spread links over the workers; different sites go side by side first,
+    so one site doesn't get several requests from you at the same moment."""
+    by_site = {}
+    for j in jobs:
+        by_site.setdefault(j["site"], []).append(j)
+    order = []
+    while any(by_site.values()):
+        for site in list(by_site):
+            if by_site[site]:
+                order.append(by_site[site].pop(0))
+    return [order[k::lanes] for k in range(lanes)]
 
 
 def request_notifications():
@@ -1196,6 +1220,34 @@ KV = """
                         size_hint_y: None
                         height: dp(40)
                         on_state: root.save_content()
+                    Caption:
+                        text: "ACCOUNTS AT THE SAME TIME"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(40)
+                        spacing: dp(8)
+                        Chip:
+                            id: par1
+                            text: "1 at a time"
+                            group: "parallel"
+                            allow_no_selection: False
+                            font_size: "13sp"
+                            on_state: root.save_parallel()
+                        Chip:
+                            id: par2
+                            text: "2 at once"
+                            group: "parallel"
+                            allow_no_selection: False
+                            font_size: "13sp"
+                            on_state: root.save_parallel()
+                        Chip:
+                            id: par3
+                            text: "3 at once"
+                            group: "parallel"
+                            allow_no_selection: False
+                            font_size: "13sp"
+                            state: "down"
+                            on_state: root.save_parallel()
                     Widget:
                         size_hint_y: None
                         height: dp(2)
@@ -1459,10 +1511,14 @@ class Root(FloatLayout):
 
     def copy_log(self):
         """Copy the full log of the last download, for sharing when something fails."""
-        try:
-            with open(engine.paths(self.status_dir)[1], encoding="utf-8") as f:
-                lines = f.read().splitlines()
-        except OSError:
+        lines = []
+        for d in self.lanes:
+            try:
+                with open(engine.paths(d)[1], encoding="utf-8") as f:
+                    lines += f.read().splitlines()
+            except OSError:
+                pass
+        if not lines:
             lines = self.log.text.splitlines()
         # keep every meaningful line; only the file lists ("+ "/"skip ") are trimmed
         lists = [i for i, l in enumerate(lines) if l.startswith(("+ ", "skip "))]
@@ -1471,7 +1527,7 @@ class Root(FloatLayout):
         if drop:
             lines.insert(0, f"({len(drop)} file names not shown)")
         try:
-            job = engine.read_status(self.status_dir) or {}
+            job = engine.read_status(self.lanes[-1]) or {}
         except Exception:
             job = {}
         head = [f"Media Downloader {APP_VERSION}", f"Status: {self.status.text}"]
@@ -1501,7 +1557,21 @@ class Root(FloatLayout):
             return
         self.store.put("content", picked=sorted(self.content()))
 
+    def parallel(self):
+        return 3 if self.ids.par3.state == "down" else 2 if self.ids.par2.state == "down" else 1
+
+    def save_parallel(self):
+        if getattr(self, "_restoring", False) or not hasattr(self, "store"):
+            return
+        self.store.put("parallel", n=self.parallel())
+
     def restore_content(self):
+        if self.store.exists("parallel"):
+            n = self.store.get("parallel").get("n", 3)
+            self._restoring = True
+            for k in (1, 2, 3):
+                self.ids[f"par{k}"].state = "down" if k == n else "normal"
+            self._restoring = False
         if not self.store.exists("content"):
             return
         picked = set(self.store.get("content")["picked"])
@@ -1856,9 +1926,17 @@ class Root(FloatLayout):
     def status_dir(self):
         return os.path.join(App.get_running_app().user_data_dir, "job")
 
+    def lane_dir(self, k):
+        return self.status_dir if k == 1 else f"{self.status_dir}{k}"
+
+    @property
+    def lanes(self):
+        return getattr(self, "_lanes", None) or [self.status_dir]
+
     def start(self, text=None):
         if self.busy:
-            engine.request_cancel(self.status_dir)
+            for d in self.lanes:
+                engine.request_cancel(d)
             self.set_status("Stopping…")
             return
         links, bad = parse_links(self.url.text if text is None else text)
@@ -1919,35 +1997,63 @@ class Root(FloatLayout):
                 "status_dir": self.status_dir,
                 "join_stories": "join" in content and "stories" in content,
             })
-        spec = {"jobs": jobs, "status_dir": self.status_dir}
         site, user = links[0][0], links[0][1]
-        os.makedirs(self.status_dir, exist_ok=True)
-        for f in engine.paths(self.status_dir) + (engine.files_path(self.status_dir),):
-            try:
-                os.remove(f)
-            except OSError:
-                pass
+        n_lanes = max(1, min(self.parallel(), len(jobs), MAX_LANES))
+        groups = split_lanes(jobs, n_lanes)
+        for i, j in enumerate(jobs, 1):
+            j["pos"] = [i, len(jobs)]
+            j["tag"] = n_lanes > 1
+        dirs = [self.lane_dir(k) for k in range(1, n_lanes + 1)]
+        specs = []
+        for k, (d, group) in enumerate(zip(dirs, groups), 1):
+            for j in group:
+                j["status_dir"] = d
+            specs.append({"jobs": group, "status_dir": d, "lane": k, "lanes": dirs})
+        for k in range(1, MAX_LANES + 1):
+            d = self.lane_dir(k)
+            os.makedirs(d, exist_ok=True)
+            for f in engine.paths(d) + (engine.files_path(d),):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+        self._lanes = dirs
+        self._lane_links = [len(g) for g in groups]
+        self._started = time.time()
+        self._fallback = False
+        self.store.put("lanes", dirs=dirs, links=self._lane_links)
 
         self.log.text = ""
-        self._log_pos = 0
+        self._log_pos = {}
         self.clear_thumbs()
         self.progress = -1
         self.busy = True
         self.set_status((f"Downloading from {user}…" if site == "web"
                          else f"Downloading {SITE_NAMES[site]} @{user}…") if len(jobs) == 1
+                        else f"Downloading {len(jobs)} links, {n_lanes} at once…" if n_lanes > 1
                         else f"Downloading {len(jobs)} links…")
         self.set_state(BUSY)
         if bad:
             self.write("Skipped (not a supported link): " + ", ".join(bad[:5]))
         if platform == "android":
             try:
-                start_service(spec)
+                for k, spec in enumerate(specs, 1):
+                    start_service(spec, k)
             except Exception as e:
                 self.write(f"Background mode unavailable ({e}); downloading in the app.")
-                threading.Thread(target=lambda: engine.run_queue(spec, scan=media_scan),
-                                 daemon=True).start()
+                self._fallback = True
+
+                def run_all(specs=specs):
+                    for spec in specs:          # one after another inside the app
+                        engine.run_queue(spec, scan=media_scan)
+                threading.Thread(target=run_all, daemon=True).start()
+        elif len(specs) == 1:
+            threading.Thread(target=lambda: engine.run_queue(specs[0]), daemon=True).start()
         else:
-            threading.Thread(target=lambda: engine.run_queue(spec), daemon=True).start()
+            import subprocess
+            here = os.path.dirname(os.path.abspath(__file__))
+            for spec in specs:
+                subprocess.Popen([sys.executable, "-c", LANE_RUNNER, json.dumps(spec)], cwd=here)
         self._watch_job()
 
     def _watch_job(self):
@@ -1957,11 +2063,16 @@ class Root(FloatLayout):
     def resume_job(self):
         if self._job_poll is not None:
             return
-        st = engine.read_status(self.status_dir)
-        if st and st.get("state") == "running" and time.time() - st.get("beat", 0) < 45:
+        saved = self.store.get("lanes") if self.store.exists("lanes") else {}
+        self._lanes = saved.get("dirs") or [self.status_dir]
+        self._lane_links = saved.get("links") or [1] * len(self._lanes)
+        self._started, self._fallback = 0, False
+        sts = [engine.read_status(d) for d in self._lanes]
+        if any(st and st.get("state") == "running" and time.time() - st.get("beat", 0) < 45
+               for st in sts):
             self.busy = True
             self.set_state(BUSY)
-            self._log_pos = 0
+            self._log_pos = {}
             self.log.text = ""
             self.clear_thumbs()
             self._watch_job()
@@ -1971,17 +2082,21 @@ class Root(FloatLayout):
     def clear_thumbs(self):
         self.ids.thumbs.clear_widgets()
         self.thumb_count = 0
-        self._files_pos = 0
+        self._files_pos = {}
 
     def _poll_files(self):
-        try:
-            with open(engine.files_path(self.status_dir), encoding="utf-8") as f:
-                f.seek(getattr(self, "_files_pos", 0))
-                chunk = f.read()
-                self._files_pos = f.tell()
-        except OSError:
-            return
-        paths = [p for p in chunk.splitlines() if p.strip()]
+        if not isinstance(getattr(self, "_files_pos", None), dict):
+            self._files_pos = {}
+        paths = []
+        for d in self.lanes:
+            try:
+                with open(engine.files_path(d), encoding="utf-8") as f:
+                    f.seek(self._files_pos.get(d, 0))
+                    chunk = f.read()
+                    self._files_pos[d] = f.tell()
+            except OSError:
+                continue
+            paths += [p for p in chunk.splitlines() if p.strip()]
         for p in paths[-self.MAX_THUMBS:]:
             if p.lower().endswith(VIDEO_EXTS + IMAGE_EXTS):
                 tile = self._add_thumb(p)          # placeholder now, keeps download order
@@ -2015,21 +2130,77 @@ class Root(FloatLayout):
 
     def _poll_job(self, *_):
         self._poll_files()
-        st = engine.read_status(self.status_dir)
-        _, log_path, _ = engine.paths(self.status_dir)
-        try:
-            with open(log_path, encoding="utf-8") as f:
-                f.seek(self._log_pos)
-                chunk = f.read()
-                self._log_pos = f.tell()
-            if chunk:
-                lines = (self.log.text + chunk).splitlines()[-60:]
-                self.log.text = "\n".join(lines) + "\n"
-                self.scroll.scroll_y = 0
-        except OSError:
-            pass
-        if not st:
+        if not isinstance(getattr(self, "_log_pos", None), dict):
+            self._log_pos = {}
+        for d in self.lanes:
+            _, log_path, _ = engine.paths(d)
+            try:
+                with open(log_path, encoding="utf-8") as f:
+                    f.seek(self._log_pos.get(d, 0))
+                    chunk = f.read()
+                    self._log_pos[d] = f.tell()
+                if chunk:
+                    lines = (self.log.text + chunk).splitlines()[-60:]
+                    self.log.text = "\n".join(lines) + "\n"
+                    self.scroll.scroll_y = 0
+            except OSError:
+                pass
+
+        now = time.time()
+        sts = [engine.read_status(d) for d in self.lanes]
+        if len(sts) == 1:
+            st = sts[0]
+            if not st:
+                return
+            self._show_single(st)
             return
+
+        # several accounts at once: add up what the workers report
+        links = sum(self._lane_links)
+        done_links = new = problems = 0
+        frac = 0.0
+        running, waiting, states, lines = 0, 0, [], []
+        for st, n in zip(sts, self._lane_links):
+            if not st:
+                # worker not started yet (or failed to start)
+                if self._fallback or now - (self._started or now) < 60:
+                    waiting += 1
+                else:
+                    states.append("error")
+                    problems += n
+                continue
+            state = st.get("state")
+            stale = state == "running" and now - st.get("beat", 0) > 45
+            if state == "running" and not stale:
+                running += 1
+                done_links += st.get("done_links") or 0
+                new += (st.get("new_before") or 0) + (st.get("count") or 0)
+                total, seen = st.get("total") or 0, st.get("seen") or 0
+                frac += min(seen / total, 1) if total else 0
+                lines.append(st.get("status", ""))
+            else:
+                states.append("error" if stale else state)
+                done_links += st.get("done_links") or n
+                new += st.get("count") or 0
+                problems += st.get("problems", 1 if state == "error" or stale else 0) or 0
+        self.progress = min((done_links + frac) / links, 1) if links else -1
+        if running or waiting:
+            head = (f"{running} at once · {done_links} of {links} links done · "
+                    f"{new} new files")
+            self.status.text = "\n".join([head] + lines[:2])
+            return
+        if "cancelled" in states:
+            text, color = f"Stopped. {new} new files", IDLE
+        elif problems:
+            text, color = f"Finished {links} links, {problems} with problems. {new} new files", ERR
+        else:
+            text, color = f"Finished all {links} links. {new} new files", OK
+        self.status.text = text
+        self.status_color = color
+        self.progress = 1 if color == OK else -1
+        self._end_poll()
+
+    def _show_single(self, st):
         self.status.text = st.get("status", "")
         total, seen = st.get("total") or 0, st.get("seen") or 0
         self.progress = min(seen / total, 1) if total else -1
@@ -2043,11 +2214,14 @@ class Root(FloatLayout):
                 self.progress = 1
             elif state != "done":
                 self.progress = -1
-            self.busy = False
-            if self._job_poll is not None:
-                self._job_poll.cancel()
-                self._job_poll = None
-            Clock.schedule_once(self.fetch_avatars, 2)
+            self._end_poll()
+
+    def _end_poll(self):
+        self.busy = False
+        if self._job_poll is not None:
+            self._job_poll.cancel()
+            self._job_poll = None
+        Clock.schedule_once(self.fetch_avatars, 2)
 
 
 class XMediaApp(App):

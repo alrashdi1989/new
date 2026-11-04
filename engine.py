@@ -169,9 +169,10 @@ class _LineWriter(io.TextIOBase):
 
 
 class Job:
-    def __init__(self, spec, scan=None, notify=None, pos=(1, 1)):
+    def __init__(self, spec, scan=None, notify=None, pos=(1, 1), first=None):
         self.spec = spec
         self.pos = pos
+        self.first = (pos[0] == 1) if first is None else first   # first job of this worker
         self.prefix = f"[{pos[0]}/{pos[1]}] " if pos[1] > 1 else ""
         self.scan = scan or (lambda paths: None)
         self.notify = notify or (lambda text, done=False: None)
@@ -184,6 +185,7 @@ class Job:
         self.posts = set()
         self.story_items = []        # story files of this run, in order (new + already saved)
         self.skipped = 0             # files already downloaded before
+        self.job_files = []          # every new file of this job
         self.state = {"state": "running", "count": 0, "site": spec["site"],
                       "user": spec["user"], "out": spec["out"],
                       "started": time.time(), "beat": time.time(),
@@ -254,8 +256,40 @@ class Job:
                 self.record_file(out)
                 self.new_files.append(out)
 
+    VIDEO_SIBLINGS = (".mp4", ".mov", ".m4v", ".webm")
+
+    def add_sound(self):
+        """Some sites (Facebook) send a video's picture and sound as two files.
+        Put the sound back into the video and remove the separate sound file."""
+        audios = [p for p in self.job_files if p.lower().endswith((".m4a", ".aac"))]
+        fixed = 0
+        for a in audios:
+            stem = os.path.splitext(a)[0]
+            video = next((stem + e for e in self.VIDEO_SIBLINGS if os.path.exists(stem + e)), None)
+            if not video or not os.path.exists(a):
+                continue
+            self.save(status=f"{self.prefix}Adding sound to videos…")
+            tmp = stem + ".withsound.mp4"
+            try:
+                import ytjob
+                ytjob.join_parts([video, a], tmp)
+                os.replace(tmp, video)
+                os.remove(a)
+                fixed += 1
+            except Exception as e:
+                self.log(f"Couldn't add sound to {os.path.basename(video)} ({e}); "
+                         "kept the sound as a separate file")
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+        if fixed:
+            self.log(f"Added sound to {fixed} video{'s' if fixed != 1 else ''}.")
+            self.job_files = [p for p in self.job_files if os.path.exists(p)]
+
     def record_file(self, path):
         self._note_story(path)
+        self.job_files.append(path)
         try:
             with open(files_path(self.spec["status_dir"]), "a", encoding="utf-8") as f:
                 f.write(path + "\n")
@@ -263,6 +297,10 @@ class Job:
             pass
 
     def log(self, line):
+        # several accounts at once: mark each line with its link number
+        if (self.spec.get("tag") and self.prefix and line.strip() and "\n" not in line
+                and not line.startswith(("──", self.prefix))):
+            line = self.prefix + line
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
@@ -340,7 +378,7 @@ class Job:
 
     # ---- run ----
     def run(self, final=True):
-        first, n = self.pos[0] == 1, self.pos[1]
+        first, n = self.first, self.pos[1]
         if first:
             open(self.log_path, "w").close()
             open(files_path(self.spec["status_dir"]), "w").close()
@@ -429,6 +467,8 @@ class Job:
 
         if self.skipped:
             self.log(f"Already had {self.skipped} files, skipped them.")
+        if result != "cancelled" and not self.cancelled():
+            self.add_sound()
         if self.spec.get("join_stories") and result != "cancelled" and not self.cancelled():
             if len(self.story_items) < 2:
                 self.log(f"Story video: {'no' if not self.story_items else 'only 1'} story "
@@ -462,18 +502,28 @@ def run_queue(queue, scan=None, notify=None):
     """Download several links one after another.
 
     queue = {"jobs": [spec, ...]}  (a single spec dict is also accepted)
-    Returns the overall result: "done", "error" or "cancelled".
+    A job spec may carry "pos": [i, n] (its number among all links when several
+    workers share the links). Returns the overall result: "done", "error" or "cancelled".
     """
     jobs = queue.get("jobs") or [queue]
     n = len(jobs)
+
+    def pos_of(i, spec):
+        p = spec.get("pos")
+        return (int(p[0]), int(p[1])) if p else (i, n)
+
     if n == 1:
-        return Job(jobs[0], scan=scan, notify=notify).run()
+        job = Job(jobs[0], scan=scan, notify=notify, pos=pos_of(1, jobs[0]), first=True)
+        r = job.run()
+        job.save(problems=1 if r == "error" else 0, links=1, done_links=1)
+        return r
 
     results, total_new, last = [], 0, None
     for i, spec in enumerate(jobs, 1):
-        last = Job(spec, scan=scan, notify=notify, pos=(i, n))
+        last = Job(spec, scan=scan, notify=notify, pos=pos_of(i, spec), first=(i == 1))
         if last.cancelled():
             break
+        last.state.update(links=n, done_links=i - 1, new_before=total_new)
         r = last.run(final=False)
         results.append(r)
         total_new += last.count
@@ -488,7 +538,9 @@ def run_queue(queue, scan=None, notify=None):
     else:
         state, head = "done", f"Finished all {n} links."
     status = f"{head} {total_new} new files"
-    last.log("\n" + status)
-    last.save(state=state, count=total_new, total=0, seen=0, status=status)
+    if not jobs[0].get("tag"):            # with several workers the app shows the total
+        last.log("\n" + status)
+    last.save(state=state, count=total_new, total=0, seen=0, status=status,
+              problems=problems, links=n, done_links=len(results), new_before=0)
     last.notify(status, done=True)
     return state

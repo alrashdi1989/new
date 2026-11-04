@@ -31,14 +31,16 @@ wake = None
 try:
     PowerManager = autoclass("android.os.PowerManager")
     pm = service.getSystemService(Context.POWER_SERVICE)
-    wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mediadownloader:download")
+    wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                          f"mediadownloader:download{spec.get('lane') or ''}")
     wake.acquire()
 except Exception:
     wake = None
 
 
 # ---- notification ----
-FG_ID, DONE_ID, CHANNEL = 1, 2, "downloads"
+LANE = int(spec.get("lane") or 1)                # several accounts at once: worker 1-3
+FG_ID, DONE_ID, CHANNEL = (1 if LANE == 1 else 10 + LANE), 2, "downloads"
 notify_ok = True
 try:
     NotificationManager = autoclass("android.app.NotificationManager")
@@ -69,6 +71,10 @@ def notify(text, done=False):
         b.setSmallIcon(icon_done if done else icon)
         b.setContentIntent(tap)
         if done:
+            text = overall_summary(text)
+            if text is None:          # other workers are still downloading
+                return
+            b.setContentText(cs(text))
             b.setAutoCancel(True)
             nm.notify(DONE_ID, b.build())
         else:
@@ -76,6 +82,29 @@ def notify(text, done=False):
             service.startForeground(FG_ID, b.build())
     except Exception:
         pass
+
+
+def overall_summary(text):
+    """With several workers, only the last one to finish posts the summary."""
+    dirs = spec.get("lanes") or []
+    if len(dirs) < 2:
+        return text
+    links = new = problems = 0
+    stopped = False
+    for d in dirs:
+        st = engine.read_status(d) or {}
+        if d != spec["status_dir"] and st.get("state") == "running" \
+                and time.time() - st.get("beat", 0) < 45:
+            return None
+        links += st.get("links") or 1
+        new += st.get("count") or 0
+        problems += st.get("problems", 1 if st.get("state") == "error" else 0) or 0
+        stopped = stopped or st.get("state") == "cancelled"
+    if stopped:
+        return f"Stopped. {new} new files"
+    if problems:
+        return f"Finished {links} links, {problems} with problems. {new} new files"
+    return f"Finished all {links} links. {new} new files"
 
 
 # ---- media scanner (Gallery / Google Photos) ----

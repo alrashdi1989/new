@@ -127,3 +127,7 @@ Paste profile links and tap **Save** to keep them under **Favorites**. Tap
 **Get new** next to a profile (or **Get new from all**) to download only what's
 new since last time — already-downloaded posts are skipped automatically.
 Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name or **+ / –** to expand or collapse it, and **Get new** on a group header to update that whole group.
+
+## v5.2
+- **Sound in videos:** Instagram now downloads the version of each video with sound built in. Facebook sends a video's picture and sound as two files; the app now downloads both and joins them into one video with sound.
+- **Accounts at the same time:** choose 1, 2 or 3. With 2 or 3, the links (or "Get new from all") are shared between background workers that run side by side. Different sites are put side by side first. Each worker shows its own notification while it runs, and one summary appears when all are done.
