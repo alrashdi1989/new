@@ -131,3 +131,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 ## v5.2
 - **Sound in videos:** Instagram now downloads the version of each video with sound built in. Facebook sends a video's picture and sound as two files; the app now downloads both and joins them into one video with sound.
 - **Accounts at the same time:** choose 1, 2 or 3. With 2 or 3, the links (or "Get new from all") are shared between background workers that run side by side. Different sites are put side by side first. Each worker shows its own notification while it runs, and one summary appears when all are done.
+
+## v5.3
+- **Search favorites:** type part of a name, or the start of an app name ("tik", "insta"), to narrow the list. "Get new" then gets only the accounts shown.

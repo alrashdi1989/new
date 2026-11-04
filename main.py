@@ -41,7 +41,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "5.2"
+APP_VERSION = "5.3"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -1048,10 +1048,10 @@ KV = """
                             size_hint_y: 1
                             valign: "middle"
                         GhostButton:
-                            text: "Get new from all"
+                            text: ("Get new for %d shown" % root.fav_shown) if root.fav_query else "Get new from all"
                             font_size: "12sp"
                             size_hint_x: None
-                            width: dp(140)
+                            width: dp(160) if root.fav_query else dp(140)
                             opacity: 1 if root.fav_count else 0
                             disabled: not root.fav_count
                             on_release: root.download_favorites()
@@ -1064,6 +1064,26 @@ KV = """
                         opacity: 0 if root.fav_count else 1
                         text_size: self.width, None
                         halign: "left"
+                    BoxLayout:
+                        size_hint_y: None
+                        height: dp(46) if root.fav_count else 0
+                        opacity: 1 if root.fav_count else 0
+                        disabled: not root.fav_count
+                        spacing: dp(8)
+                        GlassInput:
+                            id: fav_search
+                            hint_text: "Search favorites (name or app)"
+                            height: dp(46) if root.fav_count else 0
+                            font_size: "14sp"
+                            on_text: root.set_fav_query(self.text)
+                        GhostButton:
+                            text: "×"
+                            font_size: "18sp"
+                            size_hint: None, None
+                            size: (dp(46), dp(46)) if root.fav_query else (0, 0)
+                            opacity: 1 if root.fav_query else 0
+                            disabled: not root.fav_query
+                            on_release: fav_search.text = ""
                     BoxLayout:
                         id: favs
                         orientation: "vertical"
@@ -1450,6 +1470,8 @@ class Root(FloatLayout):
     link_count = NumericProperty(0)
     thumb_count = NumericProperty(0)
     fav_count = NumericProperty(0)
+    fav_shown = NumericProperty(0)
+    fav_query = StringProperty("")
 
     def __init__(self, store, **kw):
         super().__init__(**kw)
@@ -1627,8 +1649,23 @@ class Root(FloatLayout):
             return
         self.start(text=link)
 
+    def set_fav_query(self, text):
+        self.fav_query = text.strip()
+        ev = getattr(self, "_fav_search_ev", None)
+        if ev:
+            ev.cancel()
+        self._fav_search_ev = Clock.schedule_once(lambda *_: self.refresh_favorites(), 0.15)
+
+    def _fav_matches(self, f, title=None):
+        q = self.fav_query.lower()
+        if not q:
+            return True
+        title = title or dict(self.GROUP_ORDER).get(f["site"], "Websites")
+        # name anywhere; app name from its start ("tik" finds TikTok, "na" doesn't find Snapchat)
+        return q in f["name"].lower() or title.lower().startswith(q)
+
     def download_favorites(self):
-        favs = self._favorites()
+        favs = [f for f in self._favorites() if self._fav_matches(f)]
         if not favs:
             return
         if self.busy:
@@ -1650,7 +1687,8 @@ class Root(FloatLayout):
         self.refresh_favorites()
 
     def download_group(self, site):
-        links = [f["link"] for f in self._favorites() if f["site"] == site]
+        links = [f["link"] for f in self._favorites()
+                 if f["site"] == site and self._fav_matches(f)]
         if not links:
             return
         if self.busy:
@@ -1722,11 +1760,15 @@ class Root(FloatLayout):
         favs = self._favorites()
         collapsed = self._collapsed()
         known = {k for k, _ in self.GROUP_ORDER}
+        searching = bool(self.fav_query)
+        shown = 0
         for site, title in self.GROUP_ORDER:
-            members = [f for f in favs if (f["site"] if f["site"] in known else "web") == site]
+            group = [f for f in favs if (f["site"] if f["site"] in known else "web") == site]
+            members = [f for f in group if self._fav_matches(f, title)]
             if not members:
                 continue
-            open_ = site not in collapsed
+            shown += len(members)
+            open_ = searching or site not in collapsed      # show matches even in closed groups
             text, bg, ink = BADGES.get(site, BADGES["web"])
 
             # ---- group header
@@ -1735,7 +1777,8 @@ class Root(FloatLayout):
             badge.size = (dp(36), dp(36))
             badge.font_size = "11sp"
             head.add_widget(badge)
-            name = TapLabel(text=f"[b]{title}[/b] ({len(members)})", markup=True,
+            count = f"{len(members)} of {len(group)}" if len(members) != len(group) else len(members)
+            name = TapLabel(text=f"[b]{title}[/b] ({count})", markup=True,
                             halign="left", valign="middle", font_size="14sp",
                             shorten=True, shorten_from="right")
             name.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
@@ -1773,6 +1816,12 @@ class Root(FloatLayout):
                 rm.bind(on_release=lambda _b, f=f: self.confirm_remove_favorite(f))
                 row.add_widget(rm)
                 box.add_widget(row)
+        if searching and not shown:
+            box.add_widget(Label(text=f"No favorites match “{escape_markup(self.fav_query)}”",
+                                 font_size="13sp", color=(1, 1, 1, .55), size_hint_y=None,
+                                 height=dp(36), halign="left", valign="middle",
+                                 text_size=(self.width * .8, dp(36))))
+        self.fav_shown = shown
         self.fav_count = len(favs)
         Clock.schedule_once(self.fetch_avatars, 1)
 
