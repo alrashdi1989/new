@@ -28,6 +28,7 @@ from kivy.uix.image import Image
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
+from kivy.uix.widget import Widget
 from kivy.uix.gridlayout import GridLayout  # noqa: F401 (used in KV)
 from kivy.uix.modalview import ModalView
 from kivy.uix.textinput import TextInput
@@ -41,7 +42,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "5.3"
+APP_VERSION = "6.0"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -688,6 +689,7 @@ class LineWriter(io.TextIOBase):
 
 
 KV = """
+#:import NoTransition kivy.uix.screenmanager.NoTransition
 #:import dp kivy.metrics.dp
 
 <GlassCard@BoxLayout>:
@@ -761,6 +763,41 @@ KV = """
             rgba: (1, 1, 1, .95) if self.video else (0, 0, 0, 0)
         Triangle:
             points: [self.center_x - dp(5), self.center_y - dp(8), self.center_x - dp(5), self.center_y + dp(8), self.center_x + dp(9), self.center_y]
+
+<FileTile>:
+    size_hint: None, None
+    fit_mode: "cover"
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, .08
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+    canvas.after:
+        Color:
+            rgba: (0, 0, 0, .45) if self.video else (0, 0, 0, 0)
+        Ellipse:
+            pos: self.center_x - dp(14), self.center_y - dp(14)
+            size: dp(28), dp(28)
+        Color:
+            rgba: (1, 1, 1, .95) if self.video else (0, 0, 0, 0)
+        Triangle:
+            points: [self.center_x - dp(4), self.center_y - dp(7), self.center_x - dp(4), self.center_y + dp(7), self.center_x + dp(8), self.center_y]
+        Color:
+            rgba: (.40, .85, 1, .35) if self.selected else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+        Color:
+            rgba: (.40, .85, 1, 1) if self.selected else ((1, 1, 1, .7) if self.selecting else (0, 0, 0, 0))
+        Line:
+            circle: (self.right - dp(14), self.top - dp(14), dp(8))
+            width: dp(1.5)
+        Ellipse:
+            pos: (self.right - dp(20), self.top - dp(20)) if self.selected else (self.right - dp(14), self.top - dp(14))
+            size: (dp(12), dp(12)) if self.selected else (0, 0)
 
 <SiteBadge>:
     size_hint: None, None
@@ -964,6 +1001,31 @@ KV = """
                 text: root.ok_text
                 on_release: root.confirm()
 
+<TabButton>:
+    orientation: "vertical"
+    padding: [0, dp(6), 0, dp(4)]
+    spacing: dp(2)
+    canvas.before:
+        Color:
+            rgba: (.40, .85, 1, .18) if self.state == "down" else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.x + dp(2), self.y + dp(1)
+            size: self.width - dp(4), self.height - dp(2)
+            radius: [dp(16)]
+    TabIcon:
+        icon: root.icon
+        active: root.state == "down"
+    Label:
+        text: root.text
+        font_size: "11sp"
+        bold: root.state == "down"
+        color: (.55, .9, 1, 1) if root.state == "down" else (1, 1, 1, .6)
+        size_hint_y: None
+        height: dp(16)
+        shorten: True
+
+<ButtonBehaviorBox>:
+
 <Root>:
     Image:
         source: "bg.png"
@@ -974,388 +1036,642 @@ KV = """
 
     BoxLayout:
         orientation: "vertical"
-        padding: [dp(18), dp(30), dp(18), dp(18)]
-        spacing: dp(16)
+        padding: [dp(16), dp(26), dp(16), dp(8)]
+        spacing: dp(10)
 
         BoxLayout:
             size_hint_y: None
-            height: dp(60)
+            height: dp(48)
             spacing: dp(12)
             Image:
                 source: "icon.png"
                 size_hint: None, None
-                size: dp(54), dp(54)
+                size: dp(44), dp(44)
                 pos_hint: {"center_y": .5}
             BoxLayout:
                 orientation: "vertical"
                 Label:
                     text: "Media Downloader"
-                    font_size: "22sp"
+                    font_size: "20sp"
                     bold: True
                     halign: "left"
                     valign: "bottom"
                     text_size: self.size
                 Label:
-                    text: "Save from X, TikTok, Snapchat & more"
+                    text: root.tab_title
                     font_size: "13sp"
                     color: 1, 1, 1, .6
                     halign: "left"
                     valign: "top"
                     text_size: self.size
 
-        ScrollView:
-            do_scroll_x: False
-            bar_width: dp(3)
-            bar_color: 1, 1, 1, .3
-            BoxLayout:
-                orientation: "vertical"
-                size_hint_y: None
-                height: self.minimum_height
-                spacing: dp(16)
-                padding: [0, 0, 0, dp(8)]
-                GlassCard:
-                    Caption:
-                        text: "LINKS  (one per line)"
-                    GlassInput:
-                        id: url
-                        multiline: True
-                        hint_text: "Paste links (one per line)"
-                        height: min(max(dp(50), self.minimum_height), dp(170))
-                        on_text: root.update_link_count()
+        ScreenManager:
+            id: sm
+            transition: NoTransition()
+
+            Screen:
+                name: "download"
+                ScrollView:
+                    id: dl_scroll
+                    do_scroll_x: False
+                    bar_width: dp(3)
+                    bar_color: 1, 1, 1, .3
+                    BoxLayout:
+                        orientation: "vertical"
+                        size_hint_y: None
+                        height: self.minimum_height
+                        spacing: dp(14)
+                        padding: [0, 0, 0, dp(8)]
+                        GlassCard:
+                            Caption:
+                                text: "LINKS  (one per line)"
+                            GlassInput:
+                                id: url
+                                multiline: True
+                                hint_text: "Paste links (one per line)"
+                                height: min(max(dp(50), self.minimum_height), dp(170))
+                                on_text: root.update_link_count()
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(42)
+                                spacing: dp(8)
+                                GhostButton:
+                                    text: "+ Paste"
+                                    on_release: root.paste_link()
+                                GhostButton:
+                                    text: "Clear"
+                                    on_release: root.clear_links()
+                                GhostButton:
+                                    text: "Save"
+                                    on_release: root.save_favorites()
+                                Label:
+                                    text: ("%d links" % root.link_count) if root.link_count != 1 else "1 link"
+                                    font_size: "12sp"
+                                    color: 1, 1, 1, .6
+                                    size_hint_x: .6
+                            Caption:
+                                text: "INCLUDE"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(40)
+                                spacing: dp(8)
+                                Chip:
+                                    id: images
+                                    on_state: root.save_include()
+                                    text: "Photos"
+                                    state: "down"
+                                Chip:
+                                    id: videos
+                                    on_state: root.save_include()
+                                    text: "Videos"
+                                    state: "down"
+                                Chip:
+                                    id: retweets
+                                    on_state: root.save_include()
+                                    text: "X reposts"
+                            Caption:
+                                text: "FROM PROFILES"
+                            GridLayout:
+                                cols: 4
+                                size_hint_y: None
+                                height: dp(40)
+                                spacing: dp(6)
+                                Chip:
+                                    id: c_story
+                                    text: "Stories"
+                                    font_size: "13sp"
+                                    state: "down"
+                                    on_state: root.save_content()
+                                Chip:
+                                    id: c_high
+                                    text: "Highlights"
+                                    font_size: "13sp"
+                                    state: "down"
+                                    on_state: root.save_content()
+                                Chip:
+                                    id: c_posts
+                                    text: "Posts"
+                                    font_size: "13sp"
+                                    state: "down"
+                                    on_state: root.save_content()
+                                Chip:
+                                    id: c_spot
+                                    text: "Spotlight"
+                                    font_size: "13sp"
+                                    state: "down"
+                                    on_state: root.save_content()
+                            Chip:
+                                id: c_join
+                                text: "Stories as one video (keeps the parts too)"
+                                font_size: "13sp"
+                                size_hint_y: None
+                                height: dp(40)
+                                on_state: root.save_content()
+                            Widget:
+                                size_hint_y: None
+                                height: dp(2)
+                            PrimaryButton:
+                                id: btn
+                                text: "Stop" if root.busy else ("Download %d links" % root.link_count if root.link_count > 1 else "Download")
+                                size_hint_y: None
+                                height: dp(56)
+                                on_release: root.start()
+                        GlassCard:
+                            size_hint_y: None
+                            height: dp(300) + (dp(100) if root.thumb_count else 0)
+                            spacing: dp(8)
+                            BoxLayout:
+                                size_hint_y: None
+                                height: max(dp(24), status.texture_size[1])
+                                spacing: dp(10)
+                                Widget:
+                                    size_hint: None, None
+                                    size: dp(10), dp(10)
+                                    pos_hint: {"top": 1} if status.texture_size[1] > dp(30) else {"center_y": .5}
+                                    canvas:
+                                        Color:
+                                            rgba: root.status_color
+                                        Ellipse:
+                                            pos: self.pos
+                                            size: self.size
+                                Label:
+                                    id: status
+                                    text: "Ready"
+                                    font_size: "14sp"
+                                    halign: "left"
+                                    valign: "top"
+                                    text_size: self.width, None
+                                    max_lines: 3
+                                GhostButton:
+                                    text: "Copy log"
+                                    font_size: "12sp"
+                                    size_hint: None, None
+                                    size: dp(84), dp(30)
+                                    pos_hint: {"top": 1}
+                                    on_release: root.copy_log()
+                            Widget:
+                                size_hint_y: None
+                                height: dp(6) if root.progress >= 0 else 0
+                                opacity: 1 if root.progress >= 0 else 0
+                                canvas:
+                                    Color:
+                                        rgba: 1, 1, 1, .12
+                                    RoundedRectangle:
+                                        pos: self.pos
+                                        size: self.size
+                                        radius: [dp(3)]
+                                    Color:
+                                        rgba: .40, .85, 1, 1
+                                    RoundedRectangle:
+                                        pos: self.pos
+                                        size: self.width * max(0, min(1, root.progress)), self.height
+                                        radius: [dp(3)]
+                            ScrollView:
+                                id: thumb_scroll
+                                do_scroll_y: False
+                                size_hint_y: None
+                                height: dp(92) if root.thumb_count else 0
+                                opacity: 1 if root.thumb_count else 0
+                                bar_width: dp(2)
+                                bar_color: 1, 1, 1, .3
+                                BoxLayout:
+                                    id: thumbs
+                                    size_hint_x: None
+                                    width: self.minimum_width
+                                    spacing: dp(8)
+                                    padding: [0, dp(2)]
+                            ScrollView:
+                                id: scroll
+                                bar_color: 1, 1, 1, .3
+                                bar_width: dp(3)
+                                Label:
+                                    id: log
+                                    size_hint_y: None
+                                    height: max(self.texture_size[1], dp(10))
+                                    text_size: self.width, None
+                                    halign: "left"
+                                    valign: "top"
+                                    font_size: "12sp"
+                                    font_name: "RobotoMono-Regular"
+                                    color: 1, 1, 1, .72
+                                    line_height: 1.15
+
+            Screen:
+                name: "favorites"
+                ScrollView:
+                    do_scroll_x: False
+                    bar_width: dp(3)
+                    bar_color: 1, 1, 1, .3
+                    BoxLayout:
+                        orientation: "vertical"
+                        size_hint_y: None
+                        height: self.minimum_height
+                        spacing: dp(14)
+                        padding: [0, 0, 0, dp(8)]
+                        GlassCard:
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(30)
+                                Caption:
+                                    text: "FAVORITES"
+                                    size_hint_y: 1
+                                    valign: "middle"
+                                GhostButton:
+                                    text: ("Get new for %d shown" % root.fav_shown) if root.fav_query else "Get new from all"
+                                    font_size: "12sp"
+                                    size_hint_x: None
+                                    width: dp(160) if root.fav_query else dp(140)
+                                    opacity: 1 if root.fav_count else 0
+                                    disabled: not root.fav_count
+                                    on_release: root.download_favorites()
+                            Label:
+                                text: "Save profiles here to get their new posts with one tap."
+                                font_size: "12sp"
+                                color: 1, 1, 1, .45
+                                size_hint_y: None
+                                height: 0 if root.fav_count else dp(22)
+                                opacity: 0 if root.fav_count else 1
+                                text_size: self.width, None
+                                halign: "left"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(46) if root.fav_count else 0
+                                opacity: 1 if root.fav_count else 0
+                                disabled: not root.fav_count
+                                spacing: dp(8)
+                                GlassInput:
+                                    id: fav_search
+                                    hint_text: "Search favorites (name or app)"
+                                    height: dp(46) if root.fav_count else 0
+                                    font_size: "14sp"
+                                    on_text: root.set_fav_query(self.text)
+                                GhostButton:
+                                    text: "×"
+                                    font_size: "18sp"
+                                    size_hint: None, None
+                                    size: (dp(46), dp(46)) if root.fav_query else (0, 0)
+                                    opacity: 1 if root.fav_query else 0
+                                    disabled: not root.fav_query
+                                    on_release: fav_search.text = ""
+                            BoxLayout:
+                                id: favs
+                                orientation: "vertical"
+                                size_hint_y: None
+                                height: self.minimum_height
+                                spacing: dp(6)
+
+            Screen:
+                name: "files"
+                BoxLayout:
+                    orientation: "vertical"
+                    spacing: dp(10)
                     BoxLayout:
                         size_hint_y: None
                         height: dp(42)
                         spacing: dp(8)
                         GhostButton:
-                            text: "+ Paste"
-                            on_release: root.paste_link()
-                        GhostButton:
-                            text: "Clear"
-                            on_release: root.clear_links()
-                        GhostButton:
-                            text: "Save"
-                            on_release: root.save_favorites()
-                        Label:
-                            text: ("%d links" % root.link_count) if root.link_count != 1 else "1 link"
-                            font_size: "12sp"
-                            color: 1, 1, 1, .6
-                            size_hint_x: .6
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(30)
-                        Caption:
-                            text: "FAVORITES"
-                            size_hint_y: 1
-                            valign: "middle"
-                        GhostButton:
-                            text: ("Get new for %d shown" % root.fav_shown) if root.fav_query else "Get new from all"
-                            font_size: "12sp"
+                            text: "‹ All"
                             size_hint_x: None
-                            width: dp(160) if root.fav_query else dp(140)
-                            opacity: 1 if root.fav_count else 0
-                            disabled: not root.fav_count
-                            on_release: root.download_favorites()
-                    Label:
-                        text: "Save profiles here to get their new posts with one tap."
-                        font_size: "12sp"
-                        color: 1, 1, 1, .45
-                        size_hint_y: None
-                        height: 0 if root.fav_count else dp(22)
-                        opacity: 0 if root.fav_count else 1
-                        text_size: self.width, None
-                        halign: "left"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(46) if root.fav_count else 0
-                        opacity: 1 if root.fav_count else 0
-                        disabled: not root.fav_count
-                        spacing: dp(8)
-                        GlassInput:
-                            id: fav_search
-                            hint_text: "Search favorites (name or app)"
-                            height: dp(46) if root.fav_count else 0
-                            font_size: "14sp"
-                            on_text: root.set_fav_query(self.text)
+                            width: dp(70) if root.files_account else 0
+                            opacity: 1 if root.files_account else 0
+                            disabled: not root.files_account
+                            on_release: root.files_back()
+                        Label:
+                            text: root.files_title
+                            bold: True
+                            font_size: "15sp"
+                            halign: "left"
+                            valign: "middle"
+                            text_size: self.size
+                            shorten: True
+                            shorten_from: "right"
                         GhostButton:
-                            text: "×"
-                            font_size: "18sp"
-                            size_hint: None, None
-                            size: (dp(46), dp(46)) if root.fav_query else (0, 0)
-                            opacity: 1 if root.fav_query else 0
-                            disabled: not root.fav_query
-                            on_release: fav_search.text = ""
+                            text: ("Cancel" if root.files_selecting else "Select")
+                            font_size: "13sp"
+                            size_hint_x: None
+                            width: dp(78) if root.files_account else 0
+                            opacity: 1 if root.files_account else 0
+                            disabled: not root.files_account
+                            on_release: root.files_toggle_select()
+                        GhostButton:
+                            text: "Refresh"
+                            font_size: "13sp"
+                            size_hint_x: None
+                            width: dp(84) if not root.files_account else 0
+                            opacity: 0 if root.files_account else 1
+                            disabled: bool(root.files_account)
+                            on_release: root.files_refresh()
+                    ScrollView:
+                        id: files_scroll
+                        do_scroll_x: False
+                        bar_width: dp(3)
+                        bar_color: 1, 1, 1, .3
+                        BoxLayout:
+                            id: files_box
+                            orientation: "vertical"
+                            size_hint_y: None
+                            height: self.minimum_height
+                            spacing: dp(8)
+                            padding: [0, 0, 0, dp(8)]
                     BoxLayout:
-                        id: favs
+                        size_hint_y: None
+                        height: dp(52) if root.files_selecting else 0
+                        opacity: 1 if root.files_selecting else 0
+                        disabled: not root.files_selecting
+                        spacing: dp(8)
+                        GhostButton:
+                            text: "Select all"
+                            size_hint_x: None
+                            width: dp(110)
+                            on_release: root.files_select_all()
+                        PrimaryButton:
+                            text: "Delete %d" % root.files_selected if root.files_selected else "Tap files to select"
+                            disabled: not root.files_selected
+                            on_release: root.files_delete_selected()
+
+            Screen:
+                name: "settings"
+                ScrollView:
+                    do_scroll_x: False
+                    bar_width: dp(3)
+                    bar_color: 1, 1, 1, .3
+                    BoxLayout:
                         orientation: "vertical"
                         size_hint_y: None
                         height: self.minimum_height
-                        spacing: dp(6)
-                    Caption:
-                        text: "X ACCOUNT"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(50)
-                        spacing: dp(8)
-                        SiteBadge:
-                            text: "X"
-                            badge: 0.20, 0.21, 0.25, 1
-                            ink: 1, 1, 1, 1
-                        GlassInput:
-                            id: token
-                            hint_text: "auth_token"
-                            password: True
-                        GhostButton:
-                            id: login_btn
-                            text: "Log in"
-                            size_hint_x: None
-                            width: dp(100)
-                            on_release: root.login("x")
-                    Caption:
-                        text: "TIKTOK ACCOUNT  (needed for profiles)"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(50)
-                        spacing: dp(8)
-                        SiteBadge:
-                            text: "TT"
-                            badge: 0.93, 0.22, 0.42, 1
-                            ink: 1, 1, 1, 1
-                        GlassInput:
-                            id: tt_state
-                            readonly: True
-                            hint_text: "Logged out"
-                        GhostButton:
-                            id: tt_btn
-                            text: "Log in"
-                            size_hint_x: None
-                            width: dp(100)
-                            on_release: root.login("tiktok")
-                    Caption:
-                        text: "INSTAGRAM ACCOUNT  (required)"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(50)
-                        spacing: dp(8)
-                        SiteBadge:
-                            text: "IG"
-                            badge: 0.72, 0.25, 0.68, 1
-                            ink: 1, 1, 1, 1
-                        GlassInput:
-                            id: ig_state
-                            readonly: True
-                            hint_text: "Logged out"
-                        GhostButton:
-                            id: ig_btn
-                            text: "Log in"
-                            size_hint_x: None
-                            width: dp(100)
-                            on_release: root.login("instagram")
-                    Caption:
-                        text: "FACEBOOK ACCOUNT  (recommended)"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(50)
-                        spacing: dp(8)
-                        SiteBadge:
-                            text: "FB"
-                            badge: 0.15, 0.45, 0.93, 1
-                            ink: 1, 1, 1, 1
-                        GlassInput:
-                            id: fb_state
-                            readonly: True
-                            hint_text: "Logged out"
-                        GhostButton:
-                            id: fb_btn
-                            text: "Log in"
-                            size_hint_x: None
-                            width: dp(100)
-                            on_release: root.login("facebook")
-                    Caption:
-                        text: "SAVE TO"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(50)
-                        spacing: dp(8)
-                        GlassInput:
-                            id: folder
-                            readonly: True
-                            hint_text: "Download/X-media"
-                        GhostButton:
-                            text: "Change"
-                            size_hint_x: None
-                            width: dp(124)
-                            on_release: root.choose_folder()
-                    Caption:
-                        text: "INCLUDE"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(40)
-                        spacing: dp(8)
-                        Chip:
-                            id: images
-                            text: "Photos"
-                            state: "down"
-                        Chip:
-                            id: videos
-                            text: "Videos"
-                            state: "down"
-                        Chip:
-                            id: retweets
-                            text: "X reposts"
-                    Caption:
-                        text: "FROM PROFILES"
-                    GridLayout:
-                        cols: 4
-                        size_hint_y: None
-                        height: dp(40)
-                        spacing: dp(6)
-                        Chip:
-                            id: c_story
-                            text: "Stories"
-                            font_size: "13sp"
-                            state: "down"
-                            on_state: root.save_content()
-                        Chip:
-                            id: c_high
-                            text: "Highlights"
-                            font_size: "13sp"
-                            state: "down"
-                            on_state: root.save_content()
-                        Chip:
-                            id: c_posts
-                            text: "Posts"
-                            font_size: "13sp"
-                            state: "down"
-                            on_state: root.save_content()
-                        Chip:
-                            id: c_spot
-                            text: "Spotlight"
-                            font_size: "13sp"
-                            state: "down"
-                            on_state: root.save_content()
-                    Chip:
-                        id: c_join
-                        text: "Stories as one video (keeps the parts too)"
-                        font_size: "13sp"
-                        size_hint_y: None
-                        height: dp(40)
-                        on_state: root.save_content()
-                    Caption:
-                        text: "ACCOUNTS AT THE SAME TIME"
-                    BoxLayout:
-                        size_hint_y: None
-                        height: dp(40)
-                        spacing: dp(8)
-                        Chip:
-                            id: par1
-                            text: "1 at a time"
-                            group: "parallel"
-                            allow_no_selection: False
-                            font_size: "13sp"
-                            on_state: root.save_parallel()
-                        Chip:
-                            id: par2
-                            text: "2 at once"
-                            group: "parallel"
-                            allow_no_selection: False
-                            font_size: "13sp"
-                            on_state: root.save_parallel()
-                        Chip:
-                            id: par3
-                            text: "3 at once"
-                            group: "parallel"
-                            allow_no_selection: False
-                            font_size: "13sp"
-                            state: "down"
-                            on_state: root.save_parallel()
-                    Widget:
-                        size_hint_y: None
-                        height: dp(2)
-                    PrimaryButton:
-                        id: btn
-                        text: "Stop" if root.busy else ("Download %d links" % root.link_count if root.link_count > 1 else "Download")
-                        size_hint_y: None
-                        height: dp(56)
-                        on_release: root.start()
-                GlassCard:
-                    size_hint_y: None
-                    height: dp(300) + (dp(100) if root.thumb_count else 0)
-                    spacing: dp(8)
-                    BoxLayout:
-                        size_hint_y: None
-                        height: max(dp(24), status.texture_size[1])
-                        spacing: dp(10)
-                        Widget:
-                            size_hint: None, None
-                            size: dp(10), dp(10)
-                            pos_hint: {"top": 1} if status.texture_size[1] > dp(30) else {"center_y": .5}
-                            canvas:
-                                Color:
-                                    rgba: root.status_color
-                                Ellipse:
-                                    pos: self.pos
-                                    size: self.size
+                        spacing: dp(14)
+                        padding: [0, 0, 0, dp(8)]
+                        GlassCard:
+                            Caption:
+                                text: "X ACCOUNT"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(50)
+                                spacing: dp(8)
+                                SiteBadge:
+                                    text: "X"
+                                    badge: 0.20, 0.21, 0.25, 1
+                                    ink: 1, 1, 1, 1
+                                GlassInput:
+                                    id: token
+                                    hint_text: "auth_token"
+                                    password: True
+                                GhostButton:
+                                    id: login_btn
+                                    text: "Log in"
+                                    size_hint_x: None
+                                    width: dp(100)
+                                    on_release: root.login("x")
+                            Caption:
+                                text: "TIKTOK ACCOUNT  (needed for profiles)"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(50)
+                                spacing: dp(8)
+                                SiteBadge:
+                                    text: "TT"
+                                    badge: 0.93, 0.22, 0.42, 1
+                                    ink: 1, 1, 1, 1
+                                GlassInput:
+                                    id: tt_state
+                                    readonly: True
+                                    hint_text: "Logged out"
+                                GhostButton:
+                                    id: tt_btn
+                                    text: "Log in"
+                                    size_hint_x: None
+                                    width: dp(100)
+                                    on_release: root.login("tiktok")
+                            Caption:
+                                text: "INSTAGRAM ACCOUNT  (required)"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(50)
+                                spacing: dp(8)
+                                SiteBadge:
+                                    text: "IG"
+                                    badge: 0.72, 0.25, 0.68, 1
+                                    ink: 1, 1, 1, 1
+                                GlassInput:
+                                    id: ig_state
+                                    readonly: True
+                                    hint_text: "Logged out"
+                                GhostButton:
+                                    id: ig_btn
+                                    text: "Log in"
+                                    size_hint_x: None
+                                    width: dp(100)
+                                    on_release: root.login("instagram")
+                            Caption:
+                                text: "FACEBOOK ACCOUNT  (recommended)"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(50)
+                                spacing: dp(8)
+                                SiteBadge:
+                                    text: "FB"
+                                    badge: 0.15, 0.45, 0.93, 1
+                                    ink: 1, 1, 1, 1
+                                GlassInput:
+                                    id: fb_state
+                                    readonly: True
+                                    hint_text: "Logged out"
+                                GhostButton:
+                                    id: fb_btn
+                                    text: "Log in"
+                                    size_hint_x: None
+                                    width: dp(100)
+                                    on_release: root.login("facebook")
+                            Caption:
+                                text: "SAVE TO"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(50)
+                                spacing: dp(8)
+                                GlassInput:
+                                    id: folder
+                                    readonly: True
+                                    hint_text: "Download/X-media"
+                                GhostButton:
+                                    text: "Change"
+                                    size_hint_x: None
+                                    width: dp(124)
+                                    on_release: root.choose_folder()
+                            Caption:
+                                text: "ACCOUNTS AT THE SAME TIME"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(40)
+                                spacing: dp(8)
+                                Chip:
+                                    id: par1
+                                    text: "1 at a time"
+                                    group: "parallel"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    on_state: root.save_parallel()
+                                Chip:
+                                    id: par2
+                                    text: "2 at once"
+                                    group: "parallel"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    on_state: root.save_parallel()
+                                Chip:
+                                    id: par3
+                                    text: "3 at once"
+                                    group: "parallel"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    state: "down"
+                                    on_state: root.save_parallel()
+                            Caption:
+                                text: "CHECK FAVORITES AUTOMATICALLY"
+                            GridLayout:
+                                cols: 4
+                                size_hint_y: None
+                                height: dp(40)
+                                spacing: dp(6)
+                                Chip:
+                                    id: auto0
+                                    text: "Off"
+                                    group: "auto"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    state: "down"
+                                    on_state: root.save_auto()
+                                Chip:
+                                    id: auto6
+                                    text: "Every 6 h"
+                                    group: "auto"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    on_state: root.save_auto()
+                                Chip:
+                                    id: auto12
+                                    text: "Every 12 h"
+                                    group: "auto"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    on_state: root.save_auto()
+                                Chip:
+                                    id: auto24
+                                    text: "Daily"
+                                    group: "auto"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    on_state: root.save_auto()
+                            Label:
+                                id: auto_info
+                                text: "Gets new posts from all your favorites in the background and tells you what's new."
+                                font_size: "12sp"
+                                color: 1, 1, 1, .55
+                                size_hint_y: None
+                                text_size: self.width, None
+                                height: self.texture_size[1]
+                                halign: "left"
                         Label:
-                            id: status
-                            text: "Ready"
-                            font_size: "14sp"
-                            halign: "left"
-                            valign: "top"
-                            text_size: self.width, None
-                            max_lines: 3
-                        GhostButton:
-                            text: "Copy log"
+                            text: "Media Downloader " + root.app_version
                             font_size: "12sp"
-                            size_hint: None, None
-                            size: dp(84), dp(30)
-                            pos_hint: {"top": 1}
-                            on_release: root.copy_log()
-                    Widget:
-                        size_hint_y: None
-                        height: dp(6) if root.progress >= 0 else 0
-                        opacity: 1 if root.progress >= 0 else 0
-                        canvas:
-                            Color:
-                                rgba: 1, 1, 1, .12
-                            RoundedRectangle:
-                                pos: self.pos
-                                size: self.size
-                                radius: [dp(3)]
-                            Color:
-                                rgba: .40, .85, 1, 1
-                            RoundedRectangle:
-                                pos: self.pos
-                                size: self.width * max(0, min(1, root.progress)), self.height
-                                radius: [dp(3)]
-                    ScrollView:
-                        id: thumb_scroll
-                        do_scroll_y: False
-                        size_hint_y: None
-                        height: dp(92) if root.thumb_count else 0
-                        opacity: 1 if root.thumb_count else 0
-                        bar_width: dp(2)
-                        bar_color: 1, 1, 1, .3
-                        BoxLayout:
-                            id: thumbs
-                            size_hint_x: None
-                            width: self.minimum_width
-                            spacing: dp(8)
-                            padding: [0, dp(2)]
-                    ScrollView:
-                        id: scroll
-                        bar_color: 1, 1, 1, .3
-                        bar_width: dp(3)
-                        Label:
-                            id: log
+                            color: 1, 1, 1, .35
                             size_hint_y: None
-                            height: max(self.texture_size[1], dp(10))
-                            text_size: self.width, None
-                            halign: "left"
-                            valign: "top"
-                            font_size: "12sp"
-                            font_name: "RobotoMono-Regular"
-                            color: 1, 1, 1, .72
-                            line_height: 1.15
+                            height: dp(24)
+
+        Label:
+            text: root.toast_text
+            size_hint_y: None
+            height: (self.texture_size[1] + dp(16)) if root.toast_text else 0
+            opacity: 1 if root.toast_text else 0
+            font_size: "13sp"
+            text_size: self.width - dp(28), None
+            halign: "center"
+            canvas.before:
+                Color:
+                    rgba: (.40, .85, 1, .22) if root.toast_text else (0, 0, 0, 0)
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(14)]
+
+        # progress while you're on another tab
+        ButtonBehaviorBox:
+            size_hint_y: None
+            height: dp(46) if (root.busy and root.tab != "download") else 0
+            opacity: 1 if (root.busy and root.tab != "download") else 0
+            disabled: not (root.busy and root.tab != "download")
+            orientation: "vertical"
+            padding: [dp(14), dp(6)]
+            spacing: dp(5)
+            on_release: root.show_tab("download")
+            canvas.before:
+                Color:
+                    rgba: 1, 1, 1, .09
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(14)]
+            Label:
+                text: (root.status_line or "Downloading…") + "   ›"
+                font_size: "12sp"
+                halign: "left"
+                valign: "middle"
+                text_size: self.size
+                shorten: True
+                shorten_from: "right"
+            Widget:
+                size_hint_y: None
+                height: dp(4)
+                canvas:
+                    Color:
+                        rgba: 1, 1, 1, .12
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(2)]
+                    Color:
+                        rgba: .40, .85, 1, 1
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.width * max(0, min(1, root.progress)), self.height
+                        radius: [dp(2)]
+
+        BoxLayout:
+            size_hint_y: None
+            height: dp(58)
+            spacing: dp(6)
+            padding: [dp(4), dp(4)]
+            canvas.before:
+                Color:
+                    rgba: .05, .07, .16, .72
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(20)]
+                Color:
+                    rgba: 1, 1, 1, .14
+                Line:
+                    rounded_rectangle: (self.x, self.y, self.width, self.height, dp(20))
+                    width: dp(1)
+            TabButton:
+                text: "Download"
+                icon: "down"
+                state: "down" if root.tab == "download" else "normal"
+                on_release: root.show_tab("download")
+            TabButton:
+                text: "Favorites" + ((" %d" % root.fav_count) if root.fav_count else "")
+                icon: "star"
+                state: "down" if root.tab == "favorites" else "normal"
+                on_release: root.show_tab("favorites")
+            TabButton:
+                text: "Files"
+                icon: "grid"
+                state: "down" if root.tab == "files" else "normal"
+                on_release: root.show_tab("files")
+            TabButton:
+                text: "Settings"
+                icon: "gear"
+                state: "down" if root.tab == "settings" else "normal"
+                on_release: root.show_tab("settings")
 """
 
 
@@ -1436,6 +1752,93 @@ class Thumb(ButtonBehavior, Image):
             App.get_running_app().root_widget.set_status(f"Couldn't open the file: {e}")
 
 
+class FileTile(ButtonBehavior, Image):
+    path = StringProperty("")
+    video = BooleanProperty(False)
+    selected = BooleanProperty(False)
+    selecting = BooleanProperty(False)
+
+    def on_release(self):
+        root = App.get_running_app().root_widget
+        if self.selecting:
+            self.selected = not self.selected
+            root.files_count_selected()
+            return
+        try:
+            if not open_file(self.path):
+                root.set_status(os.path.basename(self.path))
+        except Exception as e:
+            root.set_status(f"Couldn't open the file: {e}")
+
+
+def nice_time(ts):
+    t = time.localtime(ts)
+    today = time.localtime()
+    if t.tm_yday == today.tm_yday and t.tm_year == today.tm_year:
+        day = "today"
+    elif (time.localtime(time.time() + 86400).tm_yday == t.tm_yday):
+        day = "tomorrow"
+    elif (time.localtime(time.time() - 86400).tm_yday == t.tm_yday):
+        day = "yesterday"
+    else:
+        day = time.strftime("%d %b", t)
+    return f"{day} {time.strftime('%H:%M', t)}"
+
+
+def human_size(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def scan_downloads(save_dir):
+    """Accounts found in the download folder, grouped the way the app saves them."""
+    site_of = {v: k for k, v in FOLDERS.items()}
+    accounts = []
+
+    def media_in(path):
+        files = []
+        for dirpath, dirnames, names in os.walk(path):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            for n in names:
+                if not n.startswith(".") and n.lower().endswith(VIDEO_EXTS + IMAGE_EXTS):
+                    files.append(os.path.join(dirpath, n))
+        return files
+
+    def add(site, name, path):
+        files = media_in(path)
+        if not files:
+            return
+        size = newest = 0
+        for f in files:
+            try:
+                st = os.stat(f)
+                size += st.st_size
+                newest = max(newest, st.st_mtime)
+            except OSError:
+                pass
+        accounts.append({"site": site, "name": name, "path": path, "count": len(files),
+                         "size": size, "newest": newest})
+
+    try:
+        entries = sorted(os.listdir(save_dir), key=str.lower)
+    except OSError:
+        return []
+    for e in entries:
+        path = os.path.join(save_dir, e)
+        if e.startswith(".") or not os.path.isdir(path):
+            continue
+        if e in site_of:
+            for user in sorted(os.listdir(path), key=str.lower):
+                up = os.path.join(path, user)
+                if not user.startswith(".") and os.path.isdir(up):
+                    add(site_of[e], user, up)
+        else:
+            add("x", e, path)
+    return accounts
+
+
 class GlassInput(TextInput):
     pass
 
@@ -1463,6 +1866,62 @@ ROW_IDS = {"tiktok": ("tt_state", "tt_btn"), "instagram": ("ig_state", "ig_btn")
            "facebook": ("fb_state", "fb_btn")}
 
 
+class ButtonBehaviorBox(ButtonBehavior, BoxLayout):
+    pass
+
+
+class TabIcon(Widget):
+    """Small line icons for the tab bar (drawn, so no icon font is needed)."""
+    icon = StringProperty("")
+    active = BooleanProperty(False)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.bind(pos=self.draw, size=self.draw, icon=self.draw, active=self.draw)
+
+    def draw(self, *_):
+        from kivy.graphics import Color, Line, Ellipse, RoundedRectangle
+        import math
+        self.canvas.clear()
+        cx, cy = self.center
+        r = min(self.width, self.height) * .38
+        w = dp(1.6)
+        with self.canvas:
+            Color(*((.55, .9, 1, 1) if self.active else (1, 1, 1, .62)))
+            if self.icon == "down":
+                Line(points=[cx, cy + r, cx, cy - r * .55], width=w, cap="round")
+                Line(points=[cx - r * .55, cy, cx, cy - r * .55, cx + r * .55, cy],
+                     width=w, cap="round", joint="round")
+                Line(points=[cx - r * .8, cy - r, cx + r * .8, cy - r], width=w, cap="round")
+            elif self.icon == "star":
+                pts = []
+                for i in range(10):
+                    a = math.pi / 2 + i * math.pi / 5
+                    rr = r * (1.05 if i % 2 == 0 else .45)
+                    pts += [cx + rr * math.cos(a), cy + rr * math.sin(a)]
+                Line(points=pts, width=w, close=True, joint="round")
+            elif self.icon == "grid":
+                g, sz = r * .18, r * .82
+                for dx in (-1, 1):
+                    for dy in (-1, 1):
+                        x = cx + (g if dx > 0 else -g - sz)
+                        y = cy + (g if dy > 0 else -g - sz)
+                        Line(rounded_rectangle=(x, y, sz, sz, dp(2)), width=w)
+            elif self.icon == "gear":
+                Line(circle=(cx, cy, r * .42), width=w)
+                for i in range(8):
+                    a = i * math.pi / 4
+                    Line(points=[cx + r * .62 * math.cos(a), cy + r * .62 * math.sin(a),
+                                 cx + r * 1.0 * math.cos(a), cy + r * 1.0 * math.sin(a)],
+                         width=w * 1.3, cap="round")
+
+
+class TabButton(ButtonBehavior, BoxLayout):
+    text = StringProperty("")
+    icon = StringProperty("")
+    state = StringProperty("normal")
+
+
 class Root(FloatLayout):
     status_color = ListProperty(IDLE)
     busy = BooleanProperty(False)
@@ -1470,6 +1929,15 @@ class Root(FloatLayout):
     link_count = NumericProperty(0)
     thumb_count = NumericProperty(0)
     fav_count = NumericProperty(0)
+    tab = StringProperty("download")
+    tab_title = StringProperty("Save from X, TikTok, Snapchat & more")
+    status_line = StringProperty("")
+    files_account = StringProperty("")
+    files_title = StringProperty("Your downloads")
+    files_selecting = BooleanProperty(False)
+    files_selected = NumericProperty(0)
+    app_version = StringProperty(APP_VERSION)
+    toast_text = StringProperty("")
     fav_shown = NumericProperty(0)
     fav_query = StringProperty("")
 
@@ -1482,6 +1950,7 @@ class Root(FloatLayout):
         self.url, self.token, self.login_btn = ids.url, ids.token, ids.login_btn
         self.images, self.videos, self.retweets = ids.images, ids.videos, ids.retweets
         self.btn, self.status, self.log, self.scroll = ids.btn, ids.status, ids.log, ids.scroll
+        self.status.bind(text=lambda _w, t: setattr(self, "status_line", t.split("\n")[0]))
         saved = store.get("auth")["token"] if store.exists("auth") else ""
         self.token.text = saved
         if saved:
@@ -1579,6 +2048,122 @@ class Root(FloatLayout):
             return
         self.store.put("content", picked=sorted(self.content()))
 
+    def save_include(self):
+        if getattr(self, "_restoring", False) or not hasattr(self, "store"):
+            return
+        self.store.put("include", photos=self.images.active, videos=self.videos.active,
+                       reposts=self.retweets.active)
+
+    # ---- automatic favorites checks ----
+    AUTO_IDS = {0: "auto0", 6: "auto6", 12: "auto12", 24: "auto24"}
+
+    def auto_hours(self):
+        return next((h for h, i in self.AUTO_IDS.items() if self.ids[i].state == "down"), 0)
+
+    def save_auto(self):
+        if getattr(self, "_restoring", False) or not hasattr(self, "store"):
+            return
+        hours = self.auto_hours()
+        self.store.put("auto", hours=hours)
+        self.write_auto_spec()
+        self.arm_auto(first=True)
+        if hours:
+            self.request_auto_permission()
+        self.update_auto_info()
+
+    def write_auto_spec(self):
+        """Save the favorites as ready-made jobs for the background check."""
+        import autocheck
+        data_dir = App.get_running_app().user_data_dir
+        path = autocheck.spec_path(data_dir)
+        data = autocheck.load(path)
+        data["hours"] = self.auto_hours()
+        links, _ = parse_links("\n".join(f["link"] for f in self._favorites()))
+        # leave out sites that need a login you don't have yet
+        links = [l for l in links if not (l[0] == "instagram" and not self.store.exists("instagram"))]
+        jobs, problem = self.build_jobs(links) if links else ([], None)
+        sdir = autocheck.status_dir(data_dir)
+        for i, j in enumerate(jobs, 1):
+            j["pos"] = [i, len(jobs)]
+            j["status_dir"] = sdir
+        data["queue"] = {"jobs": [] if problem else jobs, "status_dir": sdir}
+        try:
+            autocheck.save(path, data)
+        except OSError:
+            pass
+
+    def arm_auto(self, first=False):
+        """Make sure the alarm is set (alarms are cleared when the phone restarts)."""
+        if platform != "android":
+            return
+        import autocheck
+        data_dir = App.get_running_app().user_data_dir
+        path = autocheck.spec_path(data_dir)
+        hours = self.auto_hours()
+        try:
+            if not hours:
+                autocheck.schedule(self._activity(), path, 0)
+                return
+            nxt = autocheck.load(path).get("next") or 0
+            now = time.time()
+            if first or not nxt:
+                delay = hours * 3600
+            elif nxt < now:                         # missed (phone was off): check soon
+                delay = 120
+            else:
+                delay = min(nxt - now, hours * 3600)
+            autocheck.schedule(self._activity(), path, hours, first_in=delay)
+        except Exception as e:
+            self.write(f"Couldn't set the automatic check: {e}")
+
+    def _activity(self):
+        from jnius import autoclass  # type: ignore
+        return autoclass("org.kivy.android.PythonActivity").mActivity
+
+    def request_auto_permission(self):
+        """Android 12: exact timing needs a one-time allow in Settings (13+ allows it)."""
+        if platform != "android":
+            return
+        try:
+            from jnius import autoclass  # type: ignore
+            Build = autoclass("android.os.Build$VERSION")
+            if Build.SDK_INT < 31:
+                return
+            Context = autoclass("android.content.Context")
+            act = self._activity()
+            am = act.getSystemService(Context.ALARM_SERVICE)
+            if am.canScheduleExactAlarms():
+                return
+            Intent = autoclass("android.content.Intent")
+            Settings = autoclass("android.provider.Settings")
+            Uri = autoclass("android.net.Uri")
+            act.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                                     Uri.parse("package:" + act.getPackageName())))
+        except Exception:
+            pass
+
+    def update_auto_info(self):
+        import autocheck
+        data = autocheck.load(autocheck.spec_path(App.get_running_app().user_data_dir))
+        hours = self.auto_hours()
+        lines = []
+        if not hours:
+            lines.append("Off. Turn on to get new posts from all your favorites in the "
+                         "background; you'll get a notification when there's something new.")
+        else:
+            n = len((data.get("queue") or {}).get("jobs") or [])
+            lines.append(f"Checks {n} favorite{'s' if n != 1 else ''} "
+                         f"{'daily' if hours == 24 else f'every {hours} hours'}.")
+            if data.get("next"):
+                lines.append("Next check: " + nice_time(data["next"]))
+        last = data.get("last")
+        if last:
+            new = last.get("new", 0)
+            lines.append(f"Last check: {nice_time(last['time'])} · "
+                         f"{new} new file{'s' if new != 1 else ''}"
+                         + (" · some had problems" if last.get("result") == "error" else ""))
+        self.ids.auto_info.text = "\n".join(lines)
+
     def parallel(self):
         return 3 if self.ids.par3.state == "down" else 2 if self.ids.par2.state == "down" else 1
 
@@ -1588,6 +2173,16 @@ class Root(FloatLayout):
         self.store.put("parallel", n=self.parallel())
 
     def restore_content(self):
+        self._restoring = True
+        if self.store.exists("include"):
+            inc = self.store.get("include")
+            self.ids.images.state = "down" if inc.get("photos", True) else "normal"
+            self.ids.videos.state = "down" if inc.get("videos", True) else "normal"
+            self.ids.retweets.state = "down" if inc.get("reposts", False) else "normal"
+        hours = self.store.get("auto").get("hours", 0) if self.store.exists("auto") else 0
+        for h, i in self.AUTO_IDS.items():
+            self.ids[i].state = "down" if h == hours else "normal"
+        self._restoring = False
         if self.store.exists("parallel"):
             n = self.store.get("parallel").get("n", 3)
             self._restoring = True
@@ -1625,6 +2220,7 @@ class Root(FloatLayout):
             added += 1
         self.store.put("favorites", items=favs)
         self.refresh_favorites()
+        self.write_auto_spec()
         self.set_status(f"Saved {added} to favorites." if added else "Already in your favorites.")
         self.set_state(OK if added else IDLE)
 
@@ -1641,6 +2237,7 @@ class Root(FloatLayout):
         favs = [f for f in self._favorites() if f["link"] != link]
         self.store.put("favorites", items=favs)
         self.refresh_favorites()
+        self.write_auto_spec()
         self.set_status("Removed from favorites.")
 
     def download_favorite(self, link):
@@ -1882,7 +2479,18 @@ class Root(FloatLayout):
         Clock.schedule_once(_do)
 
     def set_status(self, text):
-        Clock.schedule_once(lambda *_: setattr(self.status, "text", text))
+        def apply(*_):
+            self.status.text = text
+            if self.tab != "download" and not self.busy:
+                self.toast(text)
+        Clock.schedule_once(apply)
+
+    def toast(self, text, seconds=3.5):
+        self.toast_text = text
+        ev = getattr(self, "_toast_ev", None)
+        if ev:
+            ev.cancel()
+        self._toast_ev = Clock.schedule_once(lambda *_: setattr(self, "toast_text", ""), seconds)
 
     # ---- in-app X login (Android WebView) ----
     LOGIN = {
@@ -1964,9 +2572,268 @@ class Root(FloatLayout):
         self.set_status(f"Logged in to {name}. Paste a link and tap Download.")
         self.set_state(OK)
 
+    # ---- Files tab (downloads browser) ----
+    FILES_PAGE = 60
+
+    def files_open(self):
+        if self.files_account:
+            return
+        if getattr(self, "_files_cache", None) is None or \
+                time.time() - getattr(self, "_files_cache_t", 0) > 30:
+            self.files_refresh()
+        else:
+            self._files_render_accounts(self._files_cache)
+
+    def files_refresh(self):
+        box = self.ids.files_box
+        box.clear_widgets()
+        box.add_widget(Label(text="Looking through your downloads…", font_size="13sp",
+                             color=(1, 1, 1, .6), size_hint_y=None, height=dp(40)))
+        save_dir = self.save_dir
+
+        def work():
+            accounts = scan_downloads(save_dir)
+            def done(*_):
+                self._files_cache, self._files_cache_t = accounts, time.time()
+                if self.tab == "files" and not self.files_account:
+                    self._files_render_accounts(accounts)
+            Clock.schedule_once(done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _files_render_accounts(self, accounts):
+        from kivy.factory import Factory
+        self.files_title = "Your downloads"
+        box = self.ids.files_box
+        box.clear_widgets()
+        if not accounts:
+            box.add_widget(Label(
+                text="Nothing downloaded yet in\n" + pretty_path(self.save_dir),
+                font_size="13sp", color=(1, 1, 1, .6), size_hint_y=None, height=dp(60),
+                halign="center"))
+            return
+        total = sum(a["count"] for a in accounts)
+        size = sum(a["size"] for a in accounts)
+        self.files_title = f"Your downloads · {total} files · {human_size(size)}"
+        for site, title in self.GROUP_ORDER:
+            members = [a for a in accounts if (a["site"] if a["site"] in dict(self.GROUP_ORDER) else "web") == site]
+            if not members:
+                continue
+            members.sort(key=lambda a: -a["newest"])
+            text, bg, ink = BADGES.get(site, BADGES["web"])
+            head = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+            badge = Factory.SiteBadge(text=text, badge=bg, ink=ink)
+            badge.size = (dp(32), dp(32))
+            badge.font_size = "10sp"
+            head.add_widget(badge)
+            lab = Label(text=f"[b]{title}[/b]  ({len(members)})", markup=True, font_size="14sp",
+                        halign="left", valign="middle")
+            lab.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
+            head.add_widget(lab)
+            box.add_widget(head)
+            for a in members:
+                row = ButtonBehaviorBox(size_hint_y=None, height=dp(54), spacing=dp(10),
+                                        padding=[dp(10), dp(6)])
+                with row.canvas.before:
+                    from kivy.graphics import Color, RoundedRectangle
+                    Color(1, 1, 1, .06)
+                    rr = RoundedRectangle(radius=[dp(14)])
+                row.bind(pos=lambda w, *_, r=rr: setattr(r, "pos", w.pos),
+                         size=lambda w, *_, r=rr: setattr(r, "size", w.size))
+                av = Avatar(text=(a["name"][:1] or "?").upper())
+                fav = next((f for f in self._favorites()
+                            if f["name"].lower() == a["name"].lower() and f["site"] == a["site"]), None)
+                if fav and os.path.exists(self._avatar_path(fav["link"])):
+                    av.source = self._avatar_path(fav["link"])
+                row.add_widget(av)
+                info = Label(text=f"{escape_markup(a['name'])}\n[size=12sp][color=ffffff99]"
+                                  f"{a['count']} files · {human_size(a['size'])}[/color][/size]",
+                             markup=True, font_size="14sp", halign="left", valign="middle",
+                             max_lines=2)
+                info.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
+                row.add_widget(info)
+                row.add_widget(Label(text="›", font_size="22sp", size_hint_x=None, width=dp(20),
+                                     color=(1, 1, 1, .5)))
+                row.bind(on_release=lambda _w, a=a: self.files_show(a))
+                box.add_widget(row)
+        self.ids.files_scroll.scroll_y = 1
+
+    def files_show(self, account):
+        self._files_acc = account
+        self.files_account = account["path"]
+        self.files_title = f"{account['name']} · {SITE_NAMES.get(account['site'], '')}"
+        self.files_selecting = False
+        self.files_selected = 0
+        box = self.ids.files_box
+        box.clear_widgets()
+        box.add_widget(Label(text="Loading…", font_size="13sp", color=(1, 1, 1, .6),
+                             size_hint_y=None, height=dp(40)))
+
+        def work():
+            files = []
+            for dirpath, dirnames, names in os.walk(account["path"]):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                for n in names:
+                    if not n.startswith(".") and n.lower().endswith(VIDEO_EXTS + IMAGE_EXTS):
+                        p = os.path.join(dirpath, n)
+                        try:
+                            files.append((os.path.getmtime(p), p))
+                        except OSError:
+                            pass
+            files.sort(reverse=True)                       # newest first
+            paths = [p for _, p in files]
+            Clock.schedule_once(lambda *_: self._files_render_grid(paths))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _files_render_grid(self, paths):
+        if not self.files_account:
+            return
+        self._files_paths = paths
+        box = self.ids.files_box
+        box.clear_widgets()
+        if not paths:
+            box.add_widget(Label(text="No files here any more.", font_size="13sp",
+                                 color=(1, 1, 1, .6), size_hint_y=None, height=dp(40)))
+            return
+        acc = self._files_acc
+        self.files_title = (f"{acc['name']} · {len(paths)} files")
+        cols = 3
+        tile = (box.width - dp(6) * (cols - 1)) / cols if box.width > 50 else dp(110)
+        self._files_grid = GridLayout(cols=cols, spacing=dp(6), size_hint_y=None,
+                                      row_default_height=tile, row_force_default=True)
+        self._files_grid.bind(minimum_height=self._files_grid.setter("height"))
+        box.add_widget(self._files_grid)
+        self._files_tile = tile
+        self._files_shown = 0
+        self._files_more = None
+        self._files_add_page()
+        self.ids.files_scroll.scroll_y = 1
+
+    def _files_add_page(self, *_):
+        box, grid = self.ids.files_box, self._files_grid
+        paths = self._files_paths[self._files_shown:self._files_shown + self.FILES_PAGE]
+        for p in paths:
+            t = FileTile(path=p, video=p.lower().endswith(VIDEO_EXTS), size=(self._files_tile,) * 2,
+                         selecting=self.files_selecting)
+            grid.add_widget(t)
+            self._thumb_queue(p, t)
+        self._files_shown += len(paths)
+        if self._files_more is not None:
+            box.remove_widget(self._files_more)
+            self._files_more = None
+        left = len(self._files_paths) - self._files_shown
+        if left > 0:
+            self._files_more = GhostButton(text=f"Show more ({left} left)", size_hint_y=None,
+                                           height=dp(46))
+            self._files_more.bind(on_release=self._files_add_page)
+            box.add_widget(self._files_more)
+
+    def _thumb_queue(self, path, tile):
+        import queue
+        if getattr(self, "_tq", None) is None:
+            self._tq = queue.LifoQueue()           # newest requests first (what's on screen)
+            for _ in range(3):
+                threading.Thread(target=self._thumb_loop, daemon=True).start()
+        self._tq.put((path, tile))
+
+    def _thumb_loop(self):
+        while True:
+            path, tile = self._tq.get()
+            if tile.parent is None:                # left the page already
+                continue
+            try:
+                self._thumb_worker(path, tile)
+            except Exception:
+                pass
+
+    def files_back(self):
+        self.files_account = ""
+        self.files_selecting = False
+        self.files_selected = 0
+        self._files_render_accounts(getattr(self, "_files_cache", None) or [])
+        if getattr(self, "_files_dirty", False):
+            self._files_dirty = False
+            self.files_refresh()
+
+    def _files_tiles(self):
+        grid = getattr(self, "_files_grid", None)
+        return [w for w in grid.children if isinstance(w, FileTile)] if grid else []
+
+    def files_toggle_select(self):
+        self.files_selecting = not self.files_selecting
+        for t in self._files_tiles():
+            t.selecting = self.files_selecting
+            if not self.files_selecting:
+                t.selected = False
+        self.files_count_selected()
+
+    def files_select_all(self):
+        tiles = self._files_tiles()
+        on = not all(t.selected for t in tiles)
+        for t in tiles:
+            t.selected = on
+        self.files_count_selected()
+
+    def files_count_selected(self):
+        self.files_selected = sum(1 for t in self._files_tiles() if t.selected)
+
+    def files_delete_selected(self):
+        paths = [t.path for t in self._files_tiles() if t.selected]
+        if not paths:
+            return
+        n = len(paths)
+        ConfirmPopup(
+            title=f"Delete {n} file{'s' if n != 1 else ''}?",
+            message="They'll be removed from your phone and from Gallery. "
+                    "[b]Get new[/b] won't download them again.",
+            ok_text="Delete",
+            on_ok=lambda: self._files_delete(paths)).open()
+
+    def _files_delete(self, paths):
+        gone = []
+        for p in paths:
+            try:
+                os.remove(p)
+                gone.append(p)
+            except OSError:
+                pass
+        try:
+            media_scan(gone)              # removes them from Gallery too
+        except Exception:
+            pass
+        failed = len(paths) - len(gone)
+        self.toast(f"Deleted {len(gone)} file{'s' if len(gone) != 1 else ''}"
+                   + (f"; {failed} couldn't be deleted" if failed else "") + ".")
+        self._files_dirty = True
+        self.files_selecting = False
+        self.files_selected = 0
+        self._files_render_grid([p for p in self._files_paths if p not in set(gone)])
+
+    TAB_TITLES = {"download": "Save from X, TikTok, Snapchat & more",
+                  "favorites": "Saved profiles · one tap for new posts",
+                  "files": "Everything you downloaded",
+                  "settings": "Accounts, folder and options"}
+
+    def show_tab(self, name):
+        self.tab = name
+        self.ids.sm.current = name
+        self.tab_title = self.TAB_TITLES.get(name, "")
+        if name == "files":
+            self.files_open()
+        elif name == "settings":
+            self.update_auto_info()
+
     def on_back(self):
         if self._login_active:
             self._login_done.set()
+            return True
+        if self.tab == "files" and self.files_selecting:
+            self.files_toggle_select()
+            return True
+        if self.tab == "files" and self.files_account:
+            self.files_back()
+            return True
+        if self.tab != "download":
+            self.show_tab("download")
             return True
         return False
 
@@ -1982,40 +2849,24 @@ class Root(FloatLayout):
     def lanes(self):
         return getattr(self, "_lanes", None) or [self.status_dir]
 
-    def start(self, text=None):
-        if self.busy:
-            for d in self.lanes:
-                engine.request_cancel(d)
-            self.set_status("Stopping…")
-            return
-        links, bad = parse_links(self.url.text if text is None else text)
+    def build_jobs(self, links):
+        """Turn links into download jobs with the current options.
+        Returns (jobs, problem) — problem is a message for the user, or None."""
         if not links:
-            self.set_status("Paste a link (X, TikTok, Snapchat, Instagram, Facebook, YouTube or any website).")
-            self.set_state(ERR)
-            return
+            return [], "Paste a link (X, TikTok, Snapchat, Instagram, Facebook, YouTube or any website)."
         if not (self.images.active or self.videos.active):
-            self.set_status("Pick Photos and/or Videos.")
-            self.set_state(ERR)
-            return
+            return [], "Pick Photos and/or Videos."
         token = self.token.text.strip()
         if token:
             self.store.put("auth", token=token)
         if any(l[0] == "instagram" for l in links) and not self.store.exists("instagram"):
-            self.set_status("Log in to Instagram first (Instagram account → Log in).")
-            self.set_state(ERR)
-            return
+            return [], "Log in to Instagram first (Settings → Instagram → Log in)."
         content = self.content()
         if not content and any(l[0] in ("snapchat", "instagram", "tiktok") for l in links):
-            self.set_status("Pick at least one of Stories, Highlights, Posts or Spotlight.")
-            self.set_state(ERR)
-            return
-        if not self.ensure_access():
-            self.set_status("Allow file access, then tap Download again.")
-            return
+            return [], "Pick at least one of Stories, Highlights, Posts or Spotlight."
         jobs = []
         for site, user, gurl in links:
             out = output_dir(self.save_dir, site, user)
-            os.makedirs(out, exist_ok=True)
             if site == "youtube":
                 jobs.append({"args": [], "out": out, "out_label": pretty_path(out),
                              "site": site, "user": user, "status_dir": self.status_dir,
@@ -2046,6 +2897,25 @@ class Root(FloatLayout):
                 "status_dir": self.status_dir,
                 "join_stories": "join" in content and "stories" in content,
             })
+        return jobs, None
+
+    def start(self, text=None):
+        if self.busy:
+            for d in self.lanes:
+                engine.request_cancel(d)
+            self.set_status("Stopping…")
+            return
+        links, bad = parse_links(self.url.text if text is None else text)
+        jobs, problem = self.build_jobs(links)
+        if problem:
+            self.set_status(problem)
+            self.set_state(ERR)
+            return
+        if not self.ensure_access():
+            self.set_status("Allow file access, then tap Download again.")
+            return
+        for j in jobs:
+            os.makedirs(j["out"], exist_ok=True)
         site, user = links[0][0], links[0][1]
         n_lanes = max(1, min(self.parallel(), len(jobs), MAX_LANES))
         groups = split_lanes(jobs, n_lanes)
@@ -2284,11 +3154,23 @@ class XMediaApp(App):
             Clock.schedule_once(lambda *_: self.root_widget.ensure_access(), 1)
             Clock.schedule_once(lambda *_: request_notifications(), 2)
         Clock.schedule_once(lambda *_: self.root_widget.resume_job(), 0.5)
+        Clock.schedule_once(lambda *_: (self.root_widget.write_auto_spec(),
+                                        self.root_widget.arm_auto()), 3)
         Window.bind(on_keyboard=self._on_key)
         return self.root_widget
 
     def on_pause(self):
-        return True  # keep running while the folder picker or Settings is open
+        try:
+            self.root_widget.write_auto_spec()       # keep the background check up to date
+        except Exception:
+            pass
+        return True
+
+    def on_stop(self):
+        try:
+            self.root_widget.write_auto_spec()
+        except Exception:
+            pass  # keep running while the folder picker or Settings is open
 
     def on_resume(self):
         self.root_widget.resume_job()

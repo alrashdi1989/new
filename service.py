@@ -41,6 +41,8 @@ except Exception:
 # ---- notification ----
 LANE = int(spec.get("lane") or 1)                # several accounts at once: worker 1-3
 FG_ID, DONE_ID, CHANNEL = (1 if LANE == 1 else 10 + LANE), 2, "downloads"
+if spec.get("auto"):
+    FG_ID, DONE_ID = 30, 31
 notify_ok = True
 try:
     NotificationManager = autoclass("android.app.NotificationManager")
@@ -146,7 +148,51 @@ def finish():
         pass
 
 
-if spec.get("args") or spec.get("jobs"):
+def run_auto():
+    """Started by the alarm: check every favorite, then set the next alarm."""
+    import autocheck
+    path = spec.get("spec_path") or ""
+    data = autocheck.load(path)
+    hours = data.get("hours") or 0
+    try:
+        autocheck.schedule(service, path, hours)          # keep the chain going
+    except Exception:
+        pass
+    queue = data.get("queue") or {}
+    if not hours or not queue.get("jobs"):
+        return
+    # don't run alongside a check that is still going
+    st = engine.read_status(queue["status_dir"]) or {}
+    if st.get("state") == "running" and time.time() - st.get("beat", 0) < 45:
+        return
+    spec["status_dir"] = queue["status_dir"]
+    quiet = {"done": False}
+
+    def auto_notify(text, done=False):
+        if not done:
+            notify("Checking favorites… " + text)
+            return
+        quiet["done"] = True
+    result = engine.run_queue(queue, scan=scan, notify=auto_notify)
+    st = engine.read_status(queue["status_dir"]) or {}
+    new = st.get("count") or 0
+    data = autocheck.load(path)
+    data["last"] = {"time": time.time(), "new": new, "result": result}
+    autocheck.save(path, data)
+    if new or result == "error":                   # stay quiet when nothing changed
+        text = (f"{new} new file{'s' if new != 1 else ''} from your favorites"
+                if new else "Couldn't check some favorites")
+        if result == "error":
+            text += " (some had problems; open the app for details)"
+        notify(text, done=True)
+
+
+if spec.get("auto"):
+    try:
+        run_auto()
+    finally:
+        finish()
+elif spec.get("args") or spec.get("jobs"):
     threading.Thread(target=cancel_watch, daemon=True).start()
     try:
         engine.run_queue(spec, scan=scan, notify=notify)

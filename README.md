@@ -134,3 +134,9 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v5.3
 - **Search favorites:** type part of a name, or the start of an app name ("tik", "insta"), to narrow the list. "Get new" then gets only the accounts shown.
+
+## v6.0
+- **Tabs:** Download, Favorites, Files and Settings, with a tab bar at the bottom. While a download runs, a progress strip shows on the other tabs (tap it to see the log).
+- **Files tab:** every account you downloaded, grouped by app, with file count and size. Open an account to see its photos and videos (newest first), tap to open one, or tap Select to delete some or all (asks first; they're also removed from Gallery and won't be downloaded again).
+- **Automatic checks (Settings):** Off, every 6 h, every 12 h or daily. A separate background worker gets new posts from all favorites and notifies you only when there's something new. It keeps going without opening the app; after a phone restart it resumes the next time the app is opened.
+- Photos / Videos / X reposts choices are remembered.
