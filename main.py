@@ -42,7 +42,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "6.0"
+APP_VERSION = "6.1"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -190,7 +190,7 @@ def parse_links(text):
 
 
 def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_cookies=None,
-               site_ua=None, content=None):
+               site_ua=None, content=None, rename=False):
     content = set(content) if content is not None else {"stories", "highlights", "posts", "spotlight"}
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     if site == "facebook" and videos:
@@ -203,6 +203,12 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
         "-o", "videos=merged" if site == "instagram" else "videos=true",
         # Android's shared storage rejects : ? * " < > | \ in file names
         "-o", "path-restrict=windows",
+    ]
+    if rename:
+        # temporary name carrying the post's date; the engine renames it to
+        # "<profile> <date time>.<ext>" right after it's saved
+        args += ["-o", "filename=@@{date}@@{id}_{num}.{extension}"]
+    args += [
         "-o", "path-strip=windows",
         "-o", ('directory=["{section}"]' if site == "snapchat" else
                'directory=["{subcategory!c}"]' if (site == "tiktok" and url.endswith("/posts")
@@ -1526,6 +1532,35 @@ KV = """
                                     state: "down"
                                     on_state: root.save_parallel()
                             Caption:
+                                text: "FILE NAMES"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(40)
+                                spacing: dp(8)
+                                Chip:
+                                    id: names_new
+                                    text: "Profile + time"
+                                    group: "names"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    state: "down"
+                                    on_state: root.save_names()
+                                Chip:
+                                    id: names_orig
+                                    text: "As the site names them"
+                                    group: "names"
+                                    allow_no_selection: False
+                                    font_size: "13sp"
+                                    on_state: root.save_names()
+                            Label:
+                                text: "e.g. natgeo 2026-11-06 16-24-05.jpg (the time it was posted). YouTube and websites keep the video title."
+                                font_size: "12sp"
+                                color: 1, 1, 1, .55
+                                size_hint_y: None
+                                text_size: self.width, None
+                                height: self.texture_size[1]
+                                halign: "left"
+                            Caption:
                                 text: "CHECK FAVORITES AUTOMATICALLY"
                             GridLayout:
                                 cols: 4
@@ -2164,6 +2199,14 @@ class Root(FloatLayout):
                          + (" · some had problems" if last.get("result") == "error" else ""))
         self.ids.auto_info.text = "\n".join(lines)
 
+    def rename_files(self):
+        return self.ids.names_new.state == "down"
+
+    def save_names(self):
+        if getattr(self, "_restoring", False) or not hasattr(self, "store"):
+            return
+        self.store.put("names", rename=self.rename_files())
+
     def parallel(self):
         return 3 if self.ids.par3.state == "down" else 2 if self.ids.par2.state == "down" else 1
 
@@ -2179,6 +2222,9 @@ class Root(FloatLayout):
             self.ids.images.state = "down" if inc.get("photos", True) else "normal"
             self.ids.videos.state = "down" if inc.get("videos", True) else "normal"
             self.ids.retweets.state = "down" if inc.get("reposts", False) else "normal"
+        rename = self.store.get("names").get("rename", True) if self.store.exists("names") else True
+        self.ids.names_new.state = "down" if rename else "normal"
+        self.ids.names_orig.state = "normal" if rename else "down"
         hours = self.store.get("auto").get("hours", 0) if self.store.exists("auto") else 0
         for h, i in self.AUTO_IDS.items():
             self.ids[i].state = "down" if h == hours else "normal"
@@ -2892,9 +2938,9 @@ class Root(FloatLayout):
                                    if site in ROW_IDS and self.store.exists(site) else None,
                                    (self.store.get(site).get("ua") or login_ua())
                                    if site in ROW_IDS and self.store.exists(site) else None,
-                                   content),
+                                   content, rename=self.rename_files()),
                 "out": out, "out_label": pretty_path(out), "site": site, "user": user,
-                "status_dir": self.status_dir,
+                "status_dir": self.status_dir, "rename": self.rename_files(),
                 "join_stories": "join" in content and "stories" in content,
             })
         return jobs, None

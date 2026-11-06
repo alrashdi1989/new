@@ -140,3 +140,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 - **Files tab:** every account you downloaded, grouped by app, with file count and size. Open an account to see its photos and videos (newest first), tap to open one, or tap Select to delete some or all (asks first; they're also removed from Gallery and won't be downloaded again).
 - **Automatic checks (Settings):** Off, every 6 h, every 12 h or daily. A separate background worker gets new posts from all favorites and notifies you only when there's something new. It keeps going without opening the app; after a phone restart it resumes the next time the app is opened.
 - Photos / Videos / X reposts choices are remembered.
+
+## v6.1
+- **File names:** new downloads are named after the profile and the time the post was published, e.g. `natgeo 2026-11-06 16-24-05.jpg` (several files in one post get (2), (3)…). Settings → File names switches back to the site's own names. YouTube and websites keep the video title.

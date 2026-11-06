@@ -287,6 +287,59 @@ class Job:
             self.log(f"Added sound to {fixed} video{'s' if fixed != 1 else ''}.")
             self.job_files = [p for p in self.job_files if os.path.exists(p)]
 
+    TEMP_NAME = re.compile(r"^@@(.*?)@@")
+    DATE_IN = re.compile(r"(\d{4})-(\d{2})-(\d{2})[ T_](\d{2})[:_](\d{2})[:_](\d{2})")
+    BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+    def _names_file(self, folder):
+        return os.path.join(folder, ".names.json")
+
+    def _names(self, folder):
+        try:
+            with open(self._names_file(folder), encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def nice_name(self, path):
+        """Rename a just-saved file to "<profile> <date time>.<ext>"."""
+        folder, base = os.path.split(path)
+        m = self.TEMP_NAME.match(base)
+        if not m or not os.path.exists(path):
+            return path
+        d = self.DATE_IN.search(m.group(1))
+        if d:
+            when = "{}-{}-{} {}-{}-{}".format(*d.groups())
+        else:                                     # no post date: use when it was saved
+            when = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime(os.path.getmtime(path)))
+        ext = os.path.splitext(base)[1]
+        user = self.BAD_CHARS.sub("_", str(self.spec.get("user") or "")).strip(" .") or "media"
+        name = f"{user} {when}"
+        target, n = os.path.join(folder, name + ext), 2
+        while os.path.exists(target):             # several files in one post: (2), (3)…
+            target = os.path.join(folder, f"{name} ({n}){ext}")
+            n += 1
+        try:
+            os.replace(path, target)
+        except OSError:
+            return path
+        names = self._names(folder)               # remember, so "already have" still finds it
+        names[base] = os.path.basename(target)
+        try:
+            with open(self._names_file(folder), "w", encoding="utf-8") as f:
+                json.dump(names, f, ensure_ascii=False)
+        except OSError:
+            pass
+        return target
+
+    def renamed(self, path):
+        """Where a file the engine says we already have actually is now."""
+        folder, base = os.path.split(path)
+        if not self.TEMP_NAME.match(base):
+            return path
+        new = self._names(folder).get(base)
+        return os.path.join(folder, new) if new else path
+
     def record_file(self, path):
         self._note_story(path)
         self.job_files.append(path)
@@ -336,18 +389,22 @@ class Job:
         if line.startswith("#"):
             # list only the first few; a long list hides the useful lines in the log
             self.skipped += 1
+            had = self.renamed(line[1:].strip())
             if self.skipped <= 3:
-                self.log("skip " + os.path.basename(line[1:].strip()))
+                self.log("skip " + os.path.basename(had))
             elif self.skipped == 4:
                 self.log("skip … (more files you already have; not listed)")
-            self._note_story(line[1:].strip())
+            self._note_story(had)
         elif not line.startswith("[") and os.sep in line:
+            path = line.strip()
+            if self.spec.get("rename"):
+                path = self.nice_name(path)
             self.count += 1
-            self.new_files.append(line.strip())
+            self.new_files.append(path)
             if len(self.new_files) >= 25:
                 self.flush_scan()
-            self.log("+ " + os.path.basename(line))
-            self.record_file(line.strip())
+            self.log("+ " + os.path.basename(path))
+            self.record_file(path)
             self.save(count=self.count, total=self.total, seen=len(self.posts),
                       status=self.progress_text())
             if time.time() - self._last_notify > 2:
