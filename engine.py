@@ -464,6 +464,11 @@ class Job:
             import gallery_dl
             import snapext
             snapext.register()
+            try:
+                import threadsext
+                threadsext.register()
+            except Exception as _e:
+                self.log(f"(Threads support unavailable: {_e})")
             rc, result = 1, "error"
             old = sys.stdout, sys.stderr, sys.argv
             logging.getLogger().handlers.clear()

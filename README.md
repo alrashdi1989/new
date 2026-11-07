@@ -143,3 +143,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v6.1
 - **File names:** new downloads are named after the profile and the time the post was published, e.g. `natgeo 2026-11-06 16-24-05.jpg` (several files in one post get (2), (3)…). Settings → File names switches back to the site's own names. YouTube and websites keep the video title.
+
+## v6.2
+- **Threads:** added Threads (threads.com / threads.net) as a supported site. Paste a profile link to get its public posts, or a single post link. Photos and videos (including carousels) download with the same profile+time names. A Threads login under Settings is only needed for private profiles you follow. Built from scratch, since no downloader library supports Threads yet.

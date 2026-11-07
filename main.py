@@ -42,7 +42,7 @@ RESERVED = {"home", "explore", "search", "notifications", "messages", "i", "sett
 FB_RESERVED = {"groups", "events", "marketplace", "watch", "reel", "reels", "share", "story.php",
                "login", "login.php", "pages", "gaming", "help", "settings", "photo", "photo.php",
                "media", "profile.php", "people", "hashtag", "search", "friends", "messages"}
-APP_VERSION = "6.1"
+APP_VERSION = "6.2"
 IG_RESERVED = {"explore", "accounts", "direct", "reels", "stories", "p", "reel", "tv",
                "about", "legal", "developer", "web", "challenge", "emails", "session"}
 IMAGE_EXT = ("jpg", "jpeg", "png", "webp")
@@ -141,6 +141,19 @@ def resolve_link(text):
     m = re.match(fb + r"([\w.-]{2,80})/?(?:(?:photos|photos_by)/?)?(?:[?#].*)?$", t, re.I)
     if m and m.group(1).lower() not in FB_RESERVED:
         return "facebook", m.group(1), f"https://www.facebook.com/{m.group(1)}/photos"
+
+    # Threads (Meta). Single post, or a whole public profile.
+    th = r"^https?://(?:www\.)?threads\.(?:com|net)/"
+    m = re.match(th + r"(@[\w.]+)/post/([\w-]+)", t, re.I)
+    if m:
+        return "threads", m.group(1).lstrip("@"), \
+            f"https://www.threads.com/{m.group(1)}/post/{m.group(2)}"
+    m = re.match(th + r"(?:t|p)/([\w-]+)", t, re.I)
+    if m:
+        return "threads", "post", f"https://www.threads.com/t/{m.group(1)}"
+    m = re.match(th + r"@([\w.]+)/?(?:[?#].*)?$", t, re.I)
+    if m:
+        return "threads", m.group(1), "threads:" + m.group(1)
 
     # Snapchat single highlight / story link -> download just that one
     m = re.match(r"^https?://(?:www\.)?snapchat\.com/(?:@|add/)([\w.-]+)/(?:highlight/)?[^/?#]{20,}", t, re.I)
@@ -247,6 +260,9 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
             args += ["-o", "include=" + (",".join(inc) or "none")]
         if site_cookies:  # the Instagram login is only ever sent to Instagram
             args += ["-o", "cookies=" + json.dumps(site_cookies)]
+    elif site == "threads":
+        if site_cookies:  # the Threads login is only ever sent to Threads
+            args += ["-o", "cookies=" + json.dumps(site_cookies)]
     # Report each post's id plus the profile's post count, so the app can show
     # "post N of ~total" (only meaningful for whole profiles).
     if site == "x" and url.endswith("/media"):
@@ -257,14 +273,16 @@ def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_co
         args += ["--Print", "@@META 0|{post_shortcode|post_id|media_id}"]
     elif site == "snapchat" and url.startswith("snapfull:"):
         args += ["--Print", "@@META {_total}|{id}_{num}_{file_id}"]
+    elif site == "threads":
+        args += ["--Print", "@@META {_total}|{id}_{num}"]
     args.append(url)
     return args
 
 
 SITE_NAMES = {"x": "X", "tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-              "facebook": "Facebook", "youtube": "YouTube", "web": "website"}
+              "facebook": "Facebook", "youtube": "YouTube", "threads": "Threads", "web": "website"}
 FOLDERS = {"tiktok": "TikTok", "snapchat": "Snapchat", "instagram": "Instagram",
-           "facebook": "Facebook", "youtube": "YouTube", "web": "Web"}
+           "facebook": "Facebook", "youtube": "YouTube", "threads": "Threads", "web": "Web"}
 WEB_FORMAT_HINT = ("bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]"
                    "/b[height<=1080]/b")
 
@@ -474,6 +492,7 @@ BADGES = {
     "facebook": ("FB", (0.15, 0.45, 0.93, 1), (1, 1, 1, 1)),
     "snapchat": ("SC", (1.0, 0.84, 0.10, 1), (0.12, 0.10, 0.02, 1)),
     "youtube": ("YT", (0.86, 0.16, 0.16, 1), (1, 1, 1, 1)),
+    "threads": ("TH", (0.11, 0.11, 0.13, 1), (1, 1, 1, 1)),
     "web": ("WEB", (0.38, 0.42, 0.50, 1), (1, 1, 1, 1)),
 }
 
@@ -654,6 +673,7 @@ if platform == "android":
         "tiktok": ("https://www.tiktok.com", "https://tiktok.com", "https://m.tiktok.com"),
         "instagram": ("https://www.instagram.com", "https://instagram.com", "https://i.instagram.com"),
         "facebook": ("https://www.facebook.com", "https://m.facebook.com", "https://facebook.com"),
+        "threads": ("https://www.threads.com", "https://threads.com", "https://www.threads.net"),
     }
 
     def webview_cookies(site):
@@ -1489,6 +1509,26 @@ KV = """
                                     width: dp(100)
                                     on_release: root.login("facebook")
                             Caption:
+                                text: "THREADS ACCOUNT  (only for private profiles)"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(50)
+                                spacing: dp(8)
+                                SiteBadge:
+                                    text: "TH"
+                                    badge: 0.11, 0.11, 0.13, 1
+                                    ink: 1, 1, 1, 1
+                                GlassInput:
+                                    id: th_state
+                                    readonly: True
+                                    hint_text: "Logged out"
+                                GhostButton:
+                                    id: th_btn
+                                    text: "Log in"
+                                    size_hint_x: None
+                                    width: dp(100)
+                                    on_release: root.login("threads")
+                            Caption:
                                 text: "SAVE TO"
                             BoxLayout:
                                 size_hint_y: None
@@ -1898,7 +1938,7 @@ IDLE, BUSY, OK, ERR = (1, 1, 1, .4), (.40, .85, 1, 1), (.30, .86, .64, 1), (.98,
 
 
 ROW_IDS = {"tiktok": ("tt_state", "tt_btn"), "instagram": ("ig_state", "ig_btn"),
-           "facebook": ("fb_state", "fb_btn")}
+           "facebook": ("fb_state", "fb_btn"), "threads": ("th_state", "th_btn")}
 
 
 class ButtonBehaviorBox(ButtonBehavior, BoxLayout):
@@ -2316,9 +2356,9 @@ class Root(FloatLayout):
             return
         self.start(text="\n".join(f["link"] for f in favs))
 
-    GROUP_ORDER = [("snapchat", "Snapchat"), ("instagram", "Instagram"), ("tiktok", "TikTok"),
-                   ("youtube", "YouTube"), ("x", "X"), ("facebook", "Facebook"),
-                   ("web", "Websites")]
+    GROUP_ORDER = [("snapchat", "Snapchat"), ("instagram", "Instagram"), ("threads", "Threads"),
+                   ("tiktok", "TikTok"), ("youtube", "YouTube"), ("x", "X"),
+                   ("facebook", "Facebook"), ("web", "Websites")]
 
     def _collapsed(self):
         return set(self.store.get("fav_groups")["collapsed"]) if self.store.exists("fav_groups") else set()
@@ -2544,6 +2584,7 @@ class Root(FloatLayout):
         "tiktok": ("https://www.tiktok.com/login/phone-or-email/phone", "sessionid", "TikTok"),
         "instagram": ("https://www.instagram.com/accounts/login/", "sessionid", "Instagram"),
         "facebook": ("https://m.facebook.com/login/", "c_user", "Facebook"),
+        "threads": ("https://www.threads.com/login/", "sessionid", "Threads"),
     }
 
     def login(self, site="x"):
@@ -2899,7 +2940,7 @@ class Root(FloatLayout):
         """Turn links into download jobs with the current options.
         Returns (jobs, problem) — problem is a message for the user, or None."""
         if not links:
-            return [], "Paste a link (X, TikTok, Snapchat, Instagram, Facebook, YouTube or any website)."
+            return [], "Paste a link (X, TikTok, Snapchat, Instagram, Threads, Facebook, YouTube or any website)."
         if not (self.images.active or self.videos.active):
             return [], "Pick Photos and/or Videos."
         token = self.token.text.strip()
