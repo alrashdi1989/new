@@ -146,3 +146,7 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v6.2
 - **Threads:** added Threads (threads.com / threads.net) as a supported site. Paste a profile link to get its public posts, or a single post link. Photos and videos (including carousels) download with the same profile+time names. A Threads login under Settings is only needed for private profiles you follow. Built from scratch, since no downloader library supports Threads yet.
+
+## v6.3
+- **Floating button:** turn it on in Settings to show a small app button on top of other apps. Copy a link anywhere, tap the button, and it downloads straight away without opening the app. Drag it to move it; turn it off to hide it. Needs the one-time "Display over other apps" permission.
+- Internally, link handling moved to a shared module so the floating button builds the same jobs with your saved settings (folder, logins, options).
