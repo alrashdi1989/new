@@ -40,7 +40,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "6.4"
+APP_VERSION = "6.5"
 
 
 

@@ -153,3 +153,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v6.4
 - **Floating button fix:** the bubble now shows reliably. It was being drawn through the app window, which a background service cannot use; it now runs on its own thread inside the service. Added a check that warns if the service does not start, and a float.log for diagnosing.
+
+## v6.5
+- **Floating button:** added a paste box. Tap the bubble; if your phone blocks reading the clipboard in the background (Android 10+), a small box opens where you paste the link (system Paste always works) and tap Download. On phones that allow the background read, it still downloads in one tap with no box. More logging in float.log.
