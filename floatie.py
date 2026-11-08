@@ -1,10 +1,11 @@
 """
 Floating bubble: a small app icon that stays on top of other apps. Tap it and
 it grabs the link you last copied and starts downloading, without opening the
-app. Drag it to move it; drag it onto the "Remove" target to hide it.
+app. Drag it to move it.
 
-This runs as its own foreground service (so Android keeps it alive) and talks
-to Android directly through pyjnius, since Kivy has no overlay widget. It only
+Runs as its own foreground service (a separate process), so it talks to Android
+directly through pyjnius and posts all window work to this process's own main
+thread — it does NOT use the app's Activity, which isn't available here. It only
 reads the clipboard at the moment you tap the bubble, never in the background.
 """
 
@@ -14,11 +15,9 @@ import time
 import traceback
 
 from jnius import autoclass, cast, PythonJavaClass, java_method
-from android.runnable import run_on_ui_thread  # type: ignore
 
 PythonService = autoclass("org.kivy.android.PythonService")
 Context = autoclass("android.content.Context")
-WindowManager = autoclass("android.view.WindowManager")
 LayoutParams = autoclass("android.view.WindowManager$LayoutParams")
 PixelFormat = autoclass("android.graphics.PixelFormat")
 MotionEvent = autoclass("android.view.MotionEvent")
@@ -26,6 +25,9 @@ ImageView = autoclass("android.widget.ImageView")
 Toast = autoclass("android.widget.Toast")
 BuildVersion = autoclass("android.os.Build$VERSION")
 Gravity = autoclass("android.view.Gravity")
+Handler = autoclass("android.os.Handler")
+Looper = autoclass("android.os.Looper")
+HandlerThread = autoclass("android.os.HandlerThread")
 String = autoclass("java.lang.String")
 CharSequence = autoclass("java.lang.CharSequence")
 
@@ -33,9 +35,13 @@ SERVICE = PythonService.mService
 PKG = SERVICE.getPackageName()
 DATA_DIR = SERVICE.getFilesDir().getAbsolutePath()
 STOP_FLAG = os.path.join(DATA_DIR, "float_stop")
+ALIVE_FLAG = os.path.join(DATA_DIR, "float_alive")
 LOG = os.path.join(DATA_DIR, "float.log")
 
-_state = {"view": None, "params": None, "focus": None, "wm": None, "busy": False}
+_state = {"view": None, "params": None, "focus": None, "wm": None,
+          "busy": False, "touch": None}
+_hold = []                      # keep Java callback objects alive until they run
+_handler = None
 
 
 def log(msg):
@@ -48,18 +54,56 @@ def log(msg):
 
 def dp(px):
     try:
-        d = SERVICE.getResources().getDisplayMetrics().density
-        return int(px * d)
+        return int(px * SERVICE.getResources().getDisplayMetrics().density)
     except Exception:
         return int(px * 2.75)
 
 
-@run_on_ui_thread
+class _Runnable(PythonJavaClass):
+    __javainterfaces__ = ["java/lang/Runnable"]
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    @java_method("()V")
+    def run(self):
+        try:
+            self.fn()
+        except Exception as e:
+            log("ui run: " + repr(e) + "\n" + traceback.format_exc())
+        finally:
+            try:
+                _hold.remove(self)
+            except ValueError:
+                pass
+
+
+def ui(fn, delay=0):
+    """Run fn on our own looper thread. A dedicated HandlerThread (rather than
+    the main one) is used because in p4a the main thread runs Kivy's loop, not
+    an Android message loop, so posts to it may never run. All window work
+    happens on this one thread, which is what WindowManager requires."""
+    global _handler
+    if _handler is None:
+        ht = HandlerThread("floatie-ui")
+        ht.start()
+        _handler = Handler(ht.getLooper())
+    r = _Runnable(fn)
+    _hold.append(r)
+    if delay:
+        _handler.postDelayed(r, delay)
+    else:
+        _handler.post(r)
+
+
 def toast(msg):
-    try:
-        Toast.makeText(SERVICE, cast(CharSequence, String(msg)), Toast.LENGTH_LONG).show()
-    except Exception as e:
-        log(f"toast failed: {e}")
+    def show():
+        try:
+            Toast.makeText(SERVICE, cast(CharSequence, String(msg)), Toast.LENGTH_LONG).show()
+        except Exception as e:
+            log("toast: " + repr(e))
+    ui(show)
 
 
 def _overlay_type():
@@ -124,8 +168,6 @@ def _load_position():
 
 
 def _read_clipboard():
-    """Read the copied text. A focusable overlay is shown for a moment so
-    Android lets us read the clipboard (newer versions block it otherwise)."""
     cm = cast("android.content.ClipboardManager",
               SERVICE.getSystemService(Context.CLIPBOARD_SERVICE))
     try:
@@ -134,57 +176,43 @@ def _read_clipboard():
         clip = cm.getPrimaryClip()
         if clip is None or clip.getItemCount() == 0:
             return ""
-        item = clip.getItemAt(0)
-        text = item.coerceToText(SERVICE)
+        text = clip.getItemAt(0).coerceToText(SERVICE)
         return text.toString() if text else ""
     except Exception as e:
-        log("clipboard read: " + repr(e))
+        log("clipboard: " + repr(e))
         return ""
 
 
-@run_on_ui_thread
-def _add_focus_then_read():
-    """Add a 1px focusable window to gain focus, read clipboard, remove it."""
-    try:
-        wm = _state["wm"]
-        focus = ImageView(SERVICE)
-        lp = LayoutParams(
-            1, 1, _overlay_type(),
-            LayoutParams.FLAG_NOT_TOUCH_MODAL | LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT)
-        lp.gravity = Gravity.TOP | Gravity.START
-        wm.addView(focus, lp)
-        _state["focus"] = focus
+def on_tap():
+    """Add a tiny focusable window (so Android lets us read the clipboard),
+    read it after a moment, remove the window, then start the download."""
+    def add_focus():
+        try:
+            focus = ImageView(SERVICE)
+            lp = LayoutParams(1, 1, _overlay_type(),
+                              LayoutParams.FLAG_NOT_TOUCH_MODAL
+                              | LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                              PixelFormat.TRANSLUCENT)
+            lp.gravity = Gravity.TOP | Gravity.START
+            _state["wm"].addView(focus, lp)
+            _state["focus"] = focus
+        except Exception as e:
+            log("add_focus: " + repr(e))
 
-        Handler = autoclass("android.os.Handler")
-        Looper = autoclass("android.os.Looper")
+    def read_and_go():
+        try:
+            text = _read_clipboard()
+        finally:
+            try:
+                if _state.get("focus") is not None:
+                    _state["wm"].removeView(_state["focus"])
+                    _state["focus"] = None
+            except Exception as e:
+                log("remove_focus: " + repr(e))
+        _handle_text(text)
 
-        class Reader(PythonJavaClass):
-            __javainterfaces__ = ["java/lang/Runnable"]
-
-            @java_method("()V")
-            def run(self):
-                try:
-                    text = _read_clipboard()
-                finally:
-                    _remove_focus()
-                _handle_text(text)
-
-        Handler(Looper.getMainLooper()).postDelayed(Reader(), 120)
-    except Exception as e:
-        log("_add_focus_then_read: " + repr(e))
-        _remove_focus()
-        _handle_text(_read_clipboard())
-
-
-@run_on_ui_thread
-def _remove_focus():
-    try:
-        if _state.get("focus") is not None:
-            _state["wm"].removeView(_state["focus"])
-            _state["focus"] = None
-    except Exception as e:
-        log("_remove_focus: " + repr(e))
+    ui(add_focus)
+    ui(read_and_go, delay=150)
 
 
 def _handle_text(text):
@@ -197,8 +225,7 @@ def _handle_text(text):
         if not spec:
             return
         _state["busy"] = True
-        svc = autoclass(PKG + ".ServiceDownloader")
-        svc.start(SERVICE, json.dumps(spec))
+        autoclass(PKG + ".ServiceDownloader").start(SERVICE, json.dumps(spec))
     except Exception as e:
         log("_handle_text: " + repr(e) + "\n" + traceback.format_exc())
         toast("Couldn't start the download. Open the app and try there.")
@@ -207,66 +234,74 @@ def _handle_text(text):
         threading.Timer(2.0, lambda: _state.update(busy=False)).start()
 
 
-def on_tap():
-    _add_focus_then_read()
-
-
-@run_on_ui_thread
-def _show_bubble():
-    try:
-        wm = cast("android.view.WindowManager",
-                  SERVICE.getSystemService(Context.WINDOW_SERVICE))
-        _state["wm"] = wm
-        view = ImageView(SERVICE)
+def show_bubble():
+    def add():
         try:
-            icon = SERVICE.getPackageManager().getApplicationIcon(PKG)
-            view.setImageDrawable(icon)
-        except Exception:
-            pass
-        view.setAlpha(0.92)
-        size = dp(56)
-        x, y = _load_position()
-        params = LayoutParams(
-            size, size, _overlay_type(),
-            LayoutParams.FLAG_NOT_FOCUSABLE | LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT)
-        params.gravity = Gravity.TOP | Gravity.START
-        params.x, params.y = x, y
-        view.setOnTouchListener(TouchListener())
-        wm.addView(view, params)
-        _state["view"] = view
-        _state["params"] = params
-        log("bubble shown")
-    except Exception as e:
-        log("_show_bubble: " + repr(e) + "\n" + traceback.format_exc())
+            wm = cast("android.view.WindowManager",
+                      SERVICE.getSystemService(Context.WINDOW_SERVICE))
+            _state["wm"] = wm
+            view = ImageView(SERVICE)
+            try:
+                view.setImageDrawable(
+                    SERVICE.getPackageManager().getApplicationIcon(PKG))
+            except Exception as e:
+                log("icon: " + repr(e))
+            view.setAlpha(0.92)
+            size = dp(56)
+            x, y = _load_position()
+            params = LayoutParams(size, size, _overlay_type(),
+                                  LayoutParams.FLAG_NOT_FOCUSABLE
+                                  | LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                                  PixelFormat.TRANSLUCENT)
+            params.gravity = Gravity.TOP | Gravity.START
+            params.x, params.y = x, y
+            listener = TouchListener()
+            _state["touch"] = listener            # keep a ref (Java side holds it)
+            view.setOnTouchListener(listener)
+            wm.addView(view, params)
+            _state["view"] = view
+            _state["params"] = params
+            log("bubble shown at %d,%d" % (x, y))
+        except Exception as e:
+            log("show_bubble: " + repr(e) + "\n" + traceback.format_exc())
+            toast("Floating button couldn't be shown: " + str(e))
+    ui(add)
 
 
-@run_on_ui_thread
-def _hide_bubble():
-    try:
-        if _state.get("view") is not None:
-            _state["wm"].removeView(_state["view"])
-            _state["view"] = None
-    except Exception as e:
-        log("_hide_bubble: " + repr(e))
+def hide_bubble():
+    def rm():
+        try:
+            if _state.get("view") is not None:
+                _state["wm"].removeView(_state["view"])
+                _state["view"] = None
+        except Exception as e:
+            log("hide_bubble: " + repr(e))
+    ui(rm)
 
 
 def main():
-    try:
-        if os.path.exists(STOP_FLAG):
-            os.remove(STOP_FLAG)
-    except OSError:
-        pass
-    _show_bubble()
-    # keep the service alive until the app asks it to stop
+    log("service start (sdk %s)" % BuildVersion.SDK_INT)
+    for f in (STOP_FLAG,):
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except OSError:
+            pass
+    show_bubble()
     while not os.path.exists(STOP_FLAG):
-        time.sleep(1)
-    _hide_bubble()
-    try:
-        os.remove(STOP_FLAG)
-    except OSError:
-        pass
-    log("stopped")
+        try:
+            with open(ALIVE_FLAG, "w") as fh:
+                fh.write(str(time.time()))
+        except OSError:
+            pass
+        time.sleep(2)
+    hide_bubble()
+    for f in (STOP_FLAG, ALIVE_FLAG):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+    log("service stop")
 
 
 if __name__ == "__main__":

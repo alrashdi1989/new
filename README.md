@@ -150,3 +150,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 ## v6.3
 - **Floating button:** turn it on in Settings to show a small app button on top of other apps. Copy a link anywhere, tap the button, and it downloads straight away without opening the app. Drag it to move it; turn it off to hide it. Needs the one-time "Display over other apps" permission.
 - Internally, link handling moved to a shared module so the floating button builds the same jobs with your saved settings (folder, logins, options).
+
+## v6.4
+- **Floating button fix:** the bubble now shows reliably. It was being drawn through the app window, which a background service cannot use; it now runs on its own thread inside the service. Added a check that warns if the service does not start, and a float.log for diagnosing.

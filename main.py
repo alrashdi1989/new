@@ -40,7 +40,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "6.3"
+APP_VERSION = "6.4"
 
 
 
@@ -2028,6 +2028,9 @@ class Root(FloatLayout):
     def _float_stop_flag(self):
         return os.path.join(App.get_running_app().user_data_dir, "float_stop")
 
+    def _float_alive_flag(self):
+        return os.path.join(App.get_running_app().user_data_dir, "float_alive")
+
     def can_overlay(self):
         if platform != "android":
             return True
@@ -2063,11 +2066,24 @@ class Root(FloatLayout):
                 self.toast("Allow \"Display over other apps\", then turn it On again.")
                 self.request_overlay()
                 return
+            try:
+                os.remove(self._float_alive_flag())
+            except OSError:
+                pass
             self.start_float()
             self.toast("Floating button on. Copy a link, then tap the button.")
+            Clock.schedule_once(lambda *_: self._check_float_started(), 4)
         else:
             self.stop_float()
         self.update_float_info()
+
+    def _check_float_started(self):
+        if not self.float_on():
+            return
+        if not os.path.exists(self._float_alive_flag()):
+            self.toast("The floating button didn't start. If it keeps failing, tell me and "
+                       "I'll check the float.log in the app folder.")
+            self.write("Float service heartbeat missing after 4s.")
 
     def start_float(self):
         if platform != "android":
