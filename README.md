@@ -156,3 +156,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v6.5
 - **Floating button:** added a paste box. Tap the bubble; if your phone blocks reading the clipboard in the background (Android 10+), a small box opens where you paste the link (system Paste always works) and tap Download. On phones that allow the background read, it still downloads in one tap with no box. More logging in float.log.
+
+## v6.6
+- **Floating button, robust version:** removed the in-overlay paste box (it was crashing the background service when building its UI). Now, if the phone blocks reading the clipboard in the background, tapping the bubble briefly opens the app, which reads the copied link, starts the download, and drops you back to where you were. On phones that allow the background read it still downloads silently. Added a crash logger to float.log.

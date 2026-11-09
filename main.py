@@ -40,7 +40,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "6.5"
+APP_VERSION = "6.6"
 
 
 
@@ -3139,7 +3139,61 @@ class XMediaApp(App):
                                         self.root_widget.arm_auto(),
                                         self.root_widget.arm_float()), 3)
         Window.bind(on_keyboard=self._on_key)
+        if platform == "android":
+            try:
+                from android import activity  # type: ignore
+                activity.bind(on_new_intent=self._on_new_intent)
+            except Exception:
+                pass
+            Clock.schedule_once(lambda *_: self._check_quickpaste(), 0.8)
         return self.root_widget
+
+    # ---- floating bubble hand-off: open briefly, download the copied link, go back
+    def _on_new_intent(self, intent):
+        try:
+            if intent.getBooleanExtra("quickpaste", False):
+                intent.removeExtra("quickpaste")
+                Clock.schedule_once(lambda *_: self._do_quickpaste(), 0.2)
+        except Exception:
+            pass
+
+    def _check_quickpaste(self):
+        if platform != "android":
+            return
+        try:
+            from jnius import autoclass  # type: ignore
+            act = autoclass("org.kivy.android.PythonActivity").mActivity
+            intent = act.getIntent()
+            if intent and intent.getBooleanExtra("quickpaste", False):
+                intent.removeExtra("quickpaste")
+                self._do_quickpaste()
+        except Exception:
+            pass
+
+    def _do_quickpaste(self):
+        text = ""
+        try:
+            from kivy.core.clipboard import Clipboard
+            text = Clipboard.paste() or ""
+        except Exception as e:
+            self.root_widget.write(f"Couldn't read the clipboard: {e}")
+        self.root_widget.show_tab("download")
+        found, _bad = parse_links(text)
+        if not found:
+            self.root_widget.set_status("Copy a link, then tap the floating button again.")
+            self.root_widget.set_state(ERR)
+            return
+        self.root_widget.url.text = text
+        self.root_widget.start(text)
+        # drop back to whatever the user was using
+        Clock.schedule_once(lambda *_: self._to_background(), 1.2)
+
+    def _to_background(self):
+        try:
+            from jnius import autoclass  # type: ignore
+            autoclass("org.kivy.android.PythonActivity").mActivity.moveTaskToBack(True)
+        except Exception:
+            pass
 
     def on_pause(self):
         try:

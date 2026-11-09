@@ -1,16 +1,21 @@
 """
 Floating bubble: a small app icon that stays on top of other apps. Tap it and
-it grabs the link you last copied and starts downloading, without opening the
-app. Drag it to move it.
+it downloads the link you last copied.
 
-Runs as its own foreground service (a separate process), so it talks to Android
-directly through pyjnius and posts all window work to this process's own main
-thread — it does NOT use the app's Activity, which isn't available here. It only
-reads the clipboard at the moment you tap the bubble, never in the background.
+How a tap works:
+  1. Try to read the copied link right here (works on older Android).
+  2. If Android blocks reading the clipboard in the background (common on
+     Android 10+), briefly open the app, which can read the clipboard reliably,
+     start the download, and drop back to where you were.
+
+Runs as its own foreground service. All window work happens on one dedicated
+looper thread (a p4a service's main thread runs Kivy's loop, not an Android
+one, so posting there wouldn't run). Only touches the clipboard when you tap.
 """
 
 import json
 import os
+import sys
 import time
 import traceback
 
@@ -18,17 +23,12 @@ from jnius import autoclass, cast, PythonJavaClass, java_method
 
 PythonService = autoclass("org.kivy.android.PythonService")
 Context = autoclass("android.content.Context")
+Intent = autoclass("android.content.Intent")
 LayoutParams = autoclass("android.view.WindowManager$LayoutParams")
 PixelFormat = autoclass("android.graphics.PixelFormat")
 MotionEvent = autoclass("android.view.MotionEvent")
 ImageView = autoclass("android.widget.ImageView")
-LinearLayout = autoclass("android.widget.LinearLayout")
 EditText = autoclass("android.widget.EditText")
-Button = autoclass("android.widget.Button")
-TextView = autoclass("android.widget.TextView")
-ViewGroupLP = autoclass("android.view.ViewGroup$LayoutParams")
-LLParams = autoclass("android.widget.LinearLayout$LayoutParams")
-Color = autoclass("android.graphics.Color")
 Toast = autoclass("android.widget.Toast")
 BuildVersion = autoclass("android.os.Build$VERSION")
 Gravity = autoclass("android.view.Gravity")
@@ -46,7 +46,7 @@ ALIVE_FLAG = os.path.join(DATA_DIR, "float_alive")
 LOG = os.path.join(DATA_DIR, "float.log")
 
 _state = {"view": None, "params": None, "focus": None, "wm": None,
-          "busy": False, "touch": None, "panel": None, "edit": None}
+          "busy": False, "touch": None}
 _hold = []                      # keep Java callback objects alive until they run
 _handler = None
 
@@ -57,6 +57,13 @@ def log(msg):
             f.write(time.strftime("%H:%M:%S ") + str(msg) + "\n")
     except OSError:
         pass
+
+
+def _excepthook(exc_type, exc, tb):
+    log("UNCAUGHT: " + "".join(traceback.format_exception(exc_type, exc, tb)))
+
+
+sys.excepthook = _excepthook
 
 
 def dp(px):
@@ -87,10 +94,7 @@ class _Runnable(PythonJavaClass):
 
 
 def ui(fn, delay=0):
-    """Run fn on our own looper thread. A dedicated HandlerThread (rather than
-    the main one) is used because in p4a the main thread runs Kivy's loop, not
-    an Android message loop, so posts to it may never run. All window work
-    happens on this one thread, which is what WindowManager requires."""
+    """Run fn on our own looper thread (where window work must happen)."""
     global _handler
     if _handler is None:
         ht = HandlerThread("floatie-ui")
@@ -191,12 +195,11 @@ def _read_clipboard():
 
 
 def on_tap():
-    """Tap: try to read the copied link straight away. If Android blocks that
-    (common on newer phones), open a small paste box instead, where the system's
-    own Paste always works."""
+    """Try to read the copied link in the background; if that's blocked, let the
+    app read it instead (it opens for a moment and drops back)."""
     def add_focus():
         try:
-            focus = EditText(SERVICE)                 # a real focusable view
+            focus = EditText(SERVICE)
             focus.setFocusableInTouchMode(True)
             lp = LayoutParams(1, 1, _overlay_type(),
                               LayoutParams.FLAG_NOT_TOUCH_MODAL
@@ -222,118 +225,30 @@ def on_tap():
         import links
         found, _ = links.parse_links(text or "")
         if found:
-            _handle_text(text)             # auto path worked: download, no box
+            log("clipboard read ok; downloading")
+            _handle_text(text)                 # silent path, no app open
         else:
-            log("clipboard empty/blocked; opening paste box")
-            show_panel()
+            log("clipboard blocked; handing off to the app")
+            _launch_app_quickpaste()
 
     ui(add_focus)
     ui(read_and_go, delay=200)
 
 
-class _Click(PythonJavaClass):
-    __javainterfaces__ = ["android/view/View$OnClickListener"]
-
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    @java_method("(Landroid/view/View;)V")
-    def onClick(self, view):
-        try:
-            self.fn()
-        except Exception as e:
-            log("click: " + repr(e))
-
-
-def _dismiss_panel():
-    def rm():
-        try:
-            if _state.get("panel") is not None:
-                _state["wm"].removeView(_state["panel"])
-                _state["panel"] = None
-                _state["edit"] = None
-        except Exception as e:
-            log("dismiss_panel: " + repr(e))
-    ui(rm)
-
-
-def show_panel():
-    """A small centered box: paste a link and tap Download."""
-    def build():
-        try:
-            if _state.get("panel") is not None:
-                return
-            box = LinearLayout(SERVICE)
-            box.setOrientation(LinearLayout.VERTICAL)
-            box.setBackgroundColor(Color.argb(245, 18, 20, 38))
-            pad = dp(16)
-            box.setPadding(pad, pad, pad, pad)
-
-            title = TextView(SERVICE)
-            title.setText(cast(CharSequence, String("Paste a link to download")))
-            title.setTextColor(Color.WHITE)
-            title.setTextSize(16)
-            box.addView(title)
-
-            edit = EditText(SERVICE)
-            edit.setHint(cast(CharSequence, String("Long-press here and tap Paste")))
-            edit.setTextColor(Color.WHITE)
-            edit.setHintTextColor(Color.argb(140, 255, 255, 255))
-            edit.setSingleLine(False)
-            box.addView(edit)
-            _state["edit"] = edit
-
-            row = LinearLayout(SERVICE)
-            row.setOrientation(LinearLayout.HORIZONTAL)
-
-            def mk(text, fn):
-                b = Button(SERVICE)
-                b.setText(cast(CharSequence, String(text)))
-                lp = LLParams(0, ViewGroupLP.WRAP_CONTENT, 1.0)
-                b.setLayoutParams(lp)
-                c = _Click(fn)
-                _hold.append(c)
-                b.setOnClickListener(c)
-                row.addView(b)
-                return b
-
-            def do_paste():
-                t = _read_clipboard()
-                if t:
-                    edit.setText(cast(CharSequence, String(t)))
-                else:
-                    toast("Nothing copied. Long-press the box and tap Paste.")
-
-            def do_download():
-                try:
-                    t = edit.getText().toString()
-                except Exception:
-                    t = ""
-                _dismiss_panel()
-                _handle_text(t)
-
-            mk("Paste", do_paste)
-            mk("Download", do_download)
-            mk("✕", _dismiss_panel)
-            box.addView(row)
-
-            w = int(SERVICE.getResources().getDisplayMetrics().widthPixels * 0.86)
-            params = LayoutParams(w, ViewGroupLP.WRAP_CONTENT, _overlay_type(),
-                                  LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                                  PixelFormat.TRANSLUCENT)
-            params.gravity = Gravity.CENTER
-            _state["wm"].addView(box, params)
-            _state["panel"] = box
-            edit.requestFocus()
-            # try to pre-fill from clipboard now that the box has focus
-            t = _read_clipboard()
-            if t:
-                edit.setText(cast(CharSequence, String(t)))
-        except Exception as e:
-            log("show_panel: " + repr(e) + "\n" + traceback.format_exc())
-            toast("Couldn't open the paste box: " + str(e))
-    ui(build)
+def _launch_app_quickpaste():
+    """Open the app briefly so it can read the clipboard and start the download."""
+    try:
+        pm = SERVICE.getPackageManager()
+        intent = pm.getLaunchIntentForPackage(PKG)
+        if intent is None:
+            toast("Open the app to download this link.")
+            return
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        intent.putExtra("quickpaste", True)
+        SERVICE.startActivity(intent)
+    except Exception as e:
+        log("_launch_app_quickpaste: " + repr(e))
+        toast("Open the app to download this link.")
 
 
 def _handle_text(text):
@@ -405,12 +320,11 @@ def hide_bubble():
 
 def main():
     log("service start (sdk %s)" % BuildVersion.SDK_INT)
-    for f in (STOP_FLAG,):
-        try:
-            if os.path.exists(f):
-                os.remove(f)
-        except OSError:
-            pass
+    try:
+        if os.path.exists(STOP_FLAG):
+            os.remove(STOP_FLAG)
+    except OSError:
+        pass
     show_bubble()
     while not os.path.exists(STOP_FLAG):
         try:
@@ -429,4 +343,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        log("main crashed:\n" + traceback.format_exc())
