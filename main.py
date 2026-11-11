@@ -13,6 +13,11 @@ import sys
 import threading
 import time
 
+from kivy.config import Config
+# Kivy redraws the screen continuously; 30 fps is plenty for this app and roughly
+# halves the GPU/CPU work (and the heat) while the app is open, versus the 60 default.
+Config.set("graphics", "maxfps", "30")
+
 from kivy.app import App
 from kivy.utils import escape_markup
 from kivy.clock import Clock
@@ -40,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "6.6"
+APP_VERSION = "6.7"
 
 
 
@@ -2958,7 +2963,15 @@ class Root(FloatLayout):
 
     def _watch_job(self):
         if self._job_poll is None:
-            self._job_poll = Clock.schedule_interval(self._poll_job, 0.5)
+            # 1s is smooth enough for progress and halves the polling work vs 0.5s
+            self._job_poll = Clock.schedule_interval(self._poll_job, 1.0)
+
+    def pause_poll(self):
+        """Stop the on-screen progress poll while the app is hidden. The download
+        itself runs in its own service, so nothing is lost; resume_job re-attaches."""
+        if self._job_poll is not None:
+            self._job_poll.cancel()
+            self._job_poll = None
 
     def resume_job(self):
         if self._job_poll is not None:
@@ -3198,6 +3211,7 @@ class XMediaApp(App):
     def on_pause(self):
         try:
             self.root_widget.write_auto_spec()       # keep the background check up to date
+            self.root_widget.pause_poll()            # stop on-screen polling while hidden
         except Exception:
             pass
         return True

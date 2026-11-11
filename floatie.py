@@ -326,13 +326,19 @@ def main():
     except OSError:
         pass
     show_bubble()
+    started = time.time()
     while not os.path.exists(STOP_FLAG):
-        try:
-            with open(ALIVE_FLAG, "w") as fh:
-                fh.write(str(time.time()))
-        except OSError:
-            pass
-        time.sleep(2)
+        # the heartbeat is only needed right after start (for the app's check);
+        # after that just watch for the stop flag, and sleep longer to stay cool.
+        if time.time() - started < 60:
+            try:
+                with open(ALIVE_FLAG, "w") as fh:
+                    fh.write(str(time.time()))
+            except OSError:
+                pass
+            time.sleep(2)
+        else:
+            time.sleep(5)
     hide_bubble()
     for f in (STOP_FLAG, ALIVE_FLAG):
         try:

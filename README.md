@@ -159,3 +159,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v6.6
 - **Floating button, robust version:** removed the in-overlay paste box (it was crashing the background service when building its UI). Now, if the phone blocks reading the clipboard in the background, tapping the bubble briefly opens the app, which reads the copied link, starts the download, and drops you back to where you were. On phones that allow the background read it still downloads silently. Added a crash logger to float.log.
+
+## v6.7
+- **Less heat / battery use:** capped the screen refresh at 30fps (Kivy was redrawing at 60 the whole time the app was open), stopped the on-screen progress poll while the app is in the background (downloads keep running in their service), slowed the poll to 1s, gave the download wake lock a 30-minute limit so a stalled download can no longer keep the CPU awake, and made the floating-button service wake less often.

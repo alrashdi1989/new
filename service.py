@@ -33,7 +33,9 @@ try:
     pm = service.getSystemService(Context.POWER_SERVICE)
     wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
                           f"mediadownloader:download{spec.get('lane') or ''}")
-    wake.acquire()
+    # time-limited: if a download ever stalls, the CPU is still allowed to sleep
+    # after this, instead of staying awake (and warm) indefinitely.
+    wake.acquire(30 * 60 * 1000)
 except Exception:
     wake = None
 
