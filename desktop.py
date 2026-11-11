@@ -2,9 +2,9 @@
 Media Downloader — desktop (Windows) version.
 
 Same download engine as the phone app (engine.py, links.py, ytjob.py,
-storyjoin.py, snapext.py, threadsext.py), with a Tkinter window. On a PC it
-uses ffmpeg directly and can reuse the logins from your web browser, so there's
-no in-app sign-in to do.
+storyjoin.py, snapext.py, threadsext.py), with a modern glassy window built
+with CustomTkinter (plus a Windows 11 acrylic backdrop when available). On a PC
+it uses ffmpeg directly and can reuse the logins from your web browser.
 """
 
 import json
@@ -12,13 +12,27 @@ import os
 import sys
 import threading
 import time
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+
+import customtkinter as ctk
+from tkinter import filedialog, messagebox, StringVar, BooleanVar, Listbox
 
 import engine
 import links as L
 
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
+
+# ---- palette (glassy dark) ------------------------------------------------
+BG = "#0d1024"
+CARD = "#191d3a"
+CARD2 = "#222747"
+FG = "#eef1ff"
+MUT = "#9aa0c8"
+ACC = "#4fd0ff"
+ACC_DK = "#073042"
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
 
 # ---- where ffmpeg and our config live -------------------------------------
 
@@ -27,13 +41,12 @@ def _bundle_dir():
 
 
 def _ensure_ffmpeg_on_path():
-    """A bundled ffmpeg.exe sits next to the program; make sure tools find it."""
     d = _bundle_dir()
     exe = os.path.join(d, "ffmpeg.exe")
     if os.path.exists(exe):
         os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
         return exe
-    return "ffmpeg"          # fall back to one on PATH
+    return "ffmpeg"
 
 
 FFMPEG = _ensure_ffmpeg_on_path()
@@ -96,7 +109,7 @@ def build_jobs(found, opt):
             continue
         args = L.build_args(site, gurl, out, opt.get("token", ""), opt["photos"], opt["videos"],
                             opt["reposts"], None, None, content, rename=opt["rename"])
-        if browser:                       # reuse the browser's logins for this site
+        if browser:
             args += ["--cookies-from-browser", browser]
         jobs.append({"args": args, "out": out, "out_label": out, "site": site, "user": user,
                      "rename": opt["rename"],
@@ -109,13 +122,6 @@ def build_jobs(found, opt):
 
 # ---- the window -----------------------------------------------------------
 
-BG = "#12142a"
-CARD = "#1b1e3a"
-FG = "#ffffff"
-MUT = "#9aa0c0"
-ACC = "#4fd0ff"
-
-
 class App:
     def __init__(self, root):
         self.root = root
@@ -123,128 +129,179 @@ class App:
         self.status_dir = os.path.join(config_dir(), "job")
         os.makedirs(self.status_dir, exist_ok=True)
         self.running = False
+        self._vars()
         self._build_ui()
         self._restore()
+        self._try_acrylic()
+
+    def _try_acrylic(self):
+        """Windows 11: put a real frosted-glass backdrop behind the window."""
+        try:
+            import pywinstyles
+            pywinstyles.apply_style(self.root, "acrylic")
+        except Exception:
+            pass
+
+    def _vars(self):
+        self.v_photos = BooleanVar(value=True)
+        self.v_videos = BooleanVar(value=True)
+        self.v_reposts = BooleanVar(value=False)
+        self.v_story = BooleanVar(value=True)
+        self.v_high = BooleanVar(value=True)
+        self.v_posts = BooleanVar(value=True)
+        self.v_spot = BooleanVar(value=True)
+        self.v_join = BooleanVar(value=False)
+        self.v_only = BooleanVar(value=False)
+        self.v_rename = BooleanVar(value=True)
+        self.v_folder = StringVar(value=os.path.join(os.path.expanduser("~"), "Downloads",
+                                                     "MediaDownloader"))
+        self.v_browser = StringVar(value=BROWSERS[0])
+        self.v_status = StringVar(value="Ready.")
 
     # ---------- UI
+    def _card(self, parent, **kw):
+        return ctk.CTkFrame(parent, fg_color=CARD, corner_radius=18,
+                            border_width=1, border_color="#2c315a", **kw)
+
+    def _title(self, parent, text, size=13, color=MUT, bold=False):
+        return ctk.CTkLabel(parent, text=text, text_color=color, anchor="w",
+                            font=ctk.CTkFont(size=size, weight="bold" if bold else "normal"))
+
+    def _check(self, parent, text, var):
+        return ctk.CTkCheckBox(parent, text=text, variable=var, command=self._save,
+                               checkbox_width=20, checkbox_height=20, corner_radius=6,
+                               fg_color=ACC, hover_color=ACC, text_color=FG,
+                               font=ctk.CTkFont(size=13))
+
     def _build_ui(self):
         r = self.root
         r.title(f"Media Downloader {APP_VERSION}")
-        r.geometry("720x760")
-        r.configure(bg=BG)
-        r.minsize(600, 600)
+        r.geometry("780x820")
+        r.minsize(640, 680)
+        r.configure(fg_color=BG)
 
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        style.configure("TProgressbar", troughcolor=CARD, background=ACC, thickness=10)
+        header = ctk.CTkFrame(r, fg_color="transparent")
+        header.pack(fill="x", padx=20, pady=(16, 6))
+        ctk.CTkLabel(header, text="Media Downloader",
+                     font=ctk.CTkFont(size=22, weight="bold"), text_color=FG).pack(side="left")
+        ctk.CTkLabel(header, text=f"v{APP_VERSION}", text_color=MUT,
+                     font=ctk.CTkFont(size=12)).pack(side="left", padx=8, pady=(8, 0))
 
-        nb = ttk.Notebook(r)
-        nb.pack(fill="both", expand=True, padx=10, pady=10)
-        self.tab_dl = tk.Frame(nb, bg=BG)
-        self.tab_fav = tk.Frame(nb, bg=BG)
-        nb.add(self.tab_dl, text="Download")
-        nb.add(self.tab_fav, text="Favorites")
-        self._build_download(self.tab_dl)
-        self._build_favorites(self.tab_fav)
+        self.tabs = ctk.CTkTabview(r, fg_color=BG, segmented_button_fg_color=CARD,
+                                   segmented_button_selected_color=ACC,
+                                   segmented_button_selected_hover_color=ACC,
+                                   text_color=FG, corner_radius=16)
+        self.tabs.pack(fill="both", expand=True, padx=16, pady=(0, 6))
+        self.tabs.add("Download")
+        self.tabs.add("Favorites")
+        self._build_download(self.tabs.tab("Download"))
+        self._build_favorites(self.tabs.tab("Favorites"))
 
-    def _label(self, parent, text, **kw):
-        return tk.Label(parent, text=text, bg=kw.pop("bg", BG), fg=kw.pop("fg", MUT),
-                        anchor="w", **kw)
+        self.v_status_lbl = ctk.CTkLabel(r, textvariable=self.v_status, text_color=ACC,
+                                         anchor="w", font=ctk.CTkFont(size=12))
+        self.v_status_lbl.pack(fill="x", padx=24, pady=(0, 10))
 
     def _build_download(self, p):
-        self._label(p, "Paste one or more links (X, TikTok, Snapchat, Instagram, Threads, "
-                       "Facebook, YouTube, or any website):").pack(fill="x", padx=12, pady=(12, 2))
-        self.links = tk.Text(p, height=4, bg=CARD, fg=FG, insertbackground=FG,
-                             relief="flat", wrap="word")
-        self.links.pack(fill="x", padx=12)
+        p.configure(fg_color="transparent")
+        scroll = ctk.CTkScrollableFrame(p, fg_color="transparent")
+        scroll.pack(fill="both", expand=True)
 
-        opts = tk.Frame(p, bg=BG)
-        opts.pack(fill="x", padx=12, pady=8)
-        self.v_photos = tk.BooleanVar(value=True)
-        self.v_videos = tk.BooleanVar(value=True)
-        self.v_reposts = tk.BooleanVar(value=False)
-        self.v_story = tk.BooleanVar(value=True)
-        self.v_high = tk.BooleanVar(value=True)
-        self.v_posts = tk.BooleanVar(value=True)
-        self.v_spot = tk.BooleanVar(value=True)
-        self.v_join = tk.BooleanVar(value=False)
-        self.v_only = tk.BooleanVar(value=False)
-        self.v_rename = tk.BooleanVar(value=True)
-        checks = [("Photos", self.v_photos), ("Videos", self.v_videos), ("X reposts", self.v_reposts),
-                  ("Stories", self.v_story), ("Highlights", self.v_high), ("Posts", self.v_posts),
-                  ("Spotlight", self.v_spot)]
-        for i, (t, v) in enumerate(checks):
-            self._check(opts, t, v).grid(row=i // 4, column=i % 4, sticky="w", padx=4, pady=2)
-        row2 = tk.Frame(p, bg=BG)
-        row2.pack(fill="x", padx=12)
-        self._check(row2, "Stories as one video", self.v_join).pack(side="left")
-        self._check(row2, "keep only the combined video", self.v_only).pack(side="left", padx=12)
-        self._check(row2, "Name files profile + time", self.v_rename).pack(side="left", padx=12)
+        c1 = self._card(scroll)
+        c1.pack(fill="x", pady=(6, 10))
+        self._title(c1, "Paste links  —  X, TikTok, Snapchat, Instagram, Threads, Facebook, "
+                        "YouTube, or any website", bold=True).pack(fill="x", padx=16, pady=(14, 4))
+        self.links = ctk.CTkTextbox(c1, height=90, fg_color=CARD2, text_color=FG,
+                                    corner_radius=12, font=ctk.CTkFont(size=13))
+        self.links.pack(fill="x", padx=16, pady=(0, 10))
 
-        folder = tk.Frame(p, bg=BG)
-        folder.pack(fill="x", padx=12, pady=8)
-        self._label(folder, "Save to:").pack(side="left")
-        self.v_folder = tk.StringVar(value=os.path.join(os.path.expanduser("~"), "Downloads",
-                                                         "MediaDownloader"))
-        tk.Entry(folder, textvariable=self.v_folder, bg=CARD, fg=FG, relief="flat",
-                 insertbackground=FG).pack(side="left", fill="x", expand=True, padx=6)
-        tk.Button(folder, text="Browse", command=self._pick_folder, bg=CARD, fg=FG,
-                  relief="flat").pack(side="left")
+        grid = ctk.CTkFrame(c1, fg_color="transparent")
+        grid.pack(fill="x", padx=12, pady=(0, 6))
+        checks = [self._check(grid, t, v) for t, v in
+                  [("Photos", self.v_photos), ("Videos", self.v_videos),
+                   ("X reposts", self.v_reposts), ("Stories", self.v_story),
+                   ("Highlights", self.v_high), ("Posts", self.v_posts),
+                   ("Spotlight", self.v_spot)]]
+        for i, ch in enumerate(checks):
+            ch.grid(row=i // 4, column=i % 4, sticky="w", padx=8, pady=5)
 
-        login = tk.Frame(p, bg=BG)
-        login.pack(fill="x", padx=12)
-        self._label(login, "Use logins from browser:").pack(side="left")
-        self.v_browser = tk.StringVar(value=BROWSERS[0])
-        ttk.Combobox(login, textvariable=self.v_browser, values=BROWSERS, state="readonly",
-                     width=14).pack(side="left", padx=6)
-        self._label(login, "(needed for private / age-restricted accounts)", fg=MUT).pack(side="left")
+        row2 = ctk.CTkFrame(c1, fg_color="transparent")
+        row2.pack(fill="x", padx=12, pady=(0, 12))
+        self._check(row2, "Stories as one video", self.v_join).pack(side="left", padx=4)
+        self._check(row2, "keep only the combined", self.v_only).pack(side="left", padx=10)
+        self._check(row2, "Name files profile + time", self.v_rename).pack(side="left", padx=10)
 
-        btns = tk.Frame(p, bg=BG)
-        btns.pack(fill="x", padx=12, pady=10)
-        self.btn = tk.Button(btns, text="Download", command=self._on_download, bg=ACC,
-                             fg="#042330", relief="flat", font=("Segoe UI", 11, "bold"),
-                             height=1)
-        self.btn.pack(side="left", ipadx=20)
-        tk.Button(btns, text="Clear", command=lambda: self.links.delete("1.0", "end"),
-                  bg=CARD, fg=FG, relief="flat").pack(side="left", padx=8)
+        c2 = self._card(scroll)
+        c2.pack(fill="x", pady=(0, 10))
+        fr = ctk.CTkFrame(c2, fg_color="transparent")
+        fr.pack(fill="x", padx=16, pady=(14, 8))
+        self._title(fr, "Save to").pack(anchor="w")
+        row = ctk.CTkFrame(fr, fg_color="transparent")
+        row.pack(fill="x", pady=4)
+        ctk.CTkEntry(row, textvariable=self.v_folder, fg_color=CARD2, text_color=FG,
+                     corner_radius=10, border_width=0).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(row, text="Browse", width=90, command=self._pick_folder,
+                      fg_color=CARD2, hover_color="#2c315a", text_color=FG,
+                      corner_radius=10).pack(side="left", padx=(8, 0))
 
-        self.prog = ttk.Progressbar(p, mode="determinate", maximum=1.0)
-        self.prog.pack(fill="x", padx=12, pady=(4, 2))
-        self.v_status = tk.StringVar(value="Ready.")
-        self._label(p, "", textvariable=self.v_status, fg=ACC).pack(fill="x", padx=12)
+        lr = ctk.CTkFrame(c2, fg_color="transparent")
+        lr.pack(fill="x", padx=16, pady=(0, 14))
+        self._title(lr, "Use logins from browser   (only for private / age-restricted "
+                        "accounts)").pack(anchor="w")
+        ctk.CTkOptionMenu(lr, variable=self.v_browser, values=BROWSERS, command=lambda *_: self._save(),
+                          fg_color=CARD2, button_color=ACC_DK, button_hover_color=ACC,
+                          text_color=FG, corner_radius=10, width=180).pack(anchor="w", pady=4)
 
-        logbar = tk.Frame(p, bg=BG)
-        logbar.pack(fill="x", padx=12, pady=(8, 0))
-        self._label(logbar, "Log").pack(side="left")
-        tk.Button(logbar, text="Copy log", command=self._copy_log, bg=CARD, fg=FG,
-                  relief="flat").pack(side="right")
-        self.log = tk.Text(p, height=10, bg="#0c0e20", fg=MUT, relief="flat", wrap="word")
-        self.log.pack(fill="both", expand=True, padx=12, pady=(2, 12))
+        btns = ctk.CTkFrame(scroll, fg_color="transparent")
+        btns.pack(fill="x", pady=(0, 8))
+        self.btn = ctk.CTkButton(btns, text="⬇  Download", command=self._on_download,
+                                 fg_color=ACC, hover_color="#38b8e8", text_color=ACC_DK,
+                                 font=ctk.CTkFont(size=15, weight="bold"), height=46,
+                                 corner_radius=14)
+        self.btn.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(btns, text="Clear", width=90, command=lambda: self.links.delete("1.0", "end"),
+                      fg_color=CARD, hover_color=CARD2, text_color=FG, height=46,
+                      corner_radius=14).pack(side="left", padx=(10, 0))
 
-    def _check(self, parent, text, var):
-        return tk.Checkbutton(parent, text=text, variable=var, bg=BG, fg=FG, selectcolor=CARD,
-                              activebackground=BG, activeforeground=FG, relief="flat",
-                              highlightthickness=0, command=self._save)
+        self.prog = ctk.CTkProgressBar(scroll, progress_color=ACC, fg_color=CARD, height=8,
+                                       corner_radius=4)
+        self.prog.set(0)
+        self.prog.pack(fill="x", pady=(2, 10))
+
+        c3 = self._card(scroll)
+        c3.pack(fill="both", expand=True)
+        bar = ctk.CTkFrame(c3, fg_color="transparent")
+        bar.pack(fill="x", padx=16, pady=(12, 4))
+        self._title(bar, "Log", bold=True).pack(side="left")
+        ctk.CTkButton(bar, text="Copy log", width=90, command=self._copy_log, fg_color=CARD2,
+                      hover_color="#2c315a", text_color=FG, corner_radius=10).pack(side="right")
+        self.log = ctk.CTkTextbox(c3, height=200, fg_color="#0a0c1c", text_color=MUT,
+                                  corner_radius=12, font=ctk.CTkFont(size=12))
+        self.log.pack(fill="both", expand=True, padx=16, pady=(0, 14))
 
     def _build_favorites(self, p):
-        self._label(p, "Saved profiles — select and click \"Get new\" to download anything new:"
-                    ).pack(fill="x", padx=12, pady=(12, 4))
-        self.fav_list = tk.Listbox(p, bg=CARD, fg=FG, relief="flat", selectmode="extended",
-                                   height=16, highlightthickness=0)
-        self.fav_list.pack(fill="both", expand=True, padx=12)
-        bar = tk.Frame(p, bg=BG)
-        bar.pack(fill="x", padx=12, pady=10)
-        tk.Button(bar, text="Add from the links above", command=self._fav_add, bg=CARD, fg=FG,
-                  relief="flat").pack(side="left")
-        tk.Button(bar, text="Remove", command=self._fav_remove, bg=CARD, fg=FG,
-                  relief="flat").pack(side="left", padx=6)
-        tk.Button(bar, text="Get new (all)", command=lambda: self._fav_get(False), bg=ACC,
-                  fg="#042330", relief="flat", font=("Segoe UI", 10, "bold")).pack(side="right")
-        tk.Button(bar, text="Get new (selected)", command=lambda: self._fav_get(True), bg=CARD,
-                  fg=FG, relief="flat").pack(side="right", padx=6)
+        p.configure(fg_color="transparent")
+        c = self._card(p)
+        c.pack(fill="both", expand=True, pady=6)
+        self._title(c, "Saved profiles — \"Get new\" downloads anything new since last time",
+                    bold=True).pack(fill="x", padx=16, pady=(14, 6))
+        self.fav_list = Listbox(c, bg=CARD2, fg=FG, relief="flat", selectmode="extended",
+                                highlightthickness=0, borderwidth=0, font=("Segoe UI", 11),
+                                selectbackground=ACC_DK, selectforeground=FG, activestyle="none")
+        self.fav_list.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        bar = ctk.CTkFrame(c, fg_color="transparent")
+        bar.pack(fill="x", padx=16, pady=(0, 14))
+        ctk.CTkButton(bar, text="Add from links", command=self._fav_add, fg_color=CARD2,
+                      hover_color="#2c315a", text_color=FG, corner_radius=10,
+                      width=130).pack(side="left")
+        ctk.CTkButton(bar, text="Remove", command=self._fav_remove, fg_color=CARD2,
+                      hover_color="#2c315a", text_color=FG, corner_radius=10,
+                      width=90).pack(side="left", padx=6)
+        ctk.CTkButton(bar, text="Get new (all)", command=lambda: self._fav_get(False),
+                      fg_color=ACC, hover_color="#38b8e8", text_color=ACC_DK, corner_radius=10,
+                      font=ctk.CTkFont(weight="bold")).pack(side="right")
+        ctk.CTkButton(bar, text="Get new (selected)", command=lambda: self._fav_get(True),
+                      fg_color=CARD2, hover_color="#2c315a", text_color=FG,
+                      corner_radius=10).pack(side="right", padx=6)
 
     # ---------- settings
     def _restore(self):
@@ -279,16 +336,11 @@ class App:
 
     def _content(self):
         c = set()
-        if self.v_story.get():
-            c.add("stories")
-        if self.v_high.get():
-            c.add("highlights")
-        if self.v_posts.get():
-            c.add("posts")
-        if self.v_spot.get():
-            c.add("spotlight")
-        if self.v_join.get():
-            c.add("join")
+        for key, var in (("stories", self.v_story), ("highlights", self.v_high),
+                         ("posts", self.v_posts), ("spotlight", self.v_spot),
+                         ("join", self.v_join)):
+            if var.get():
+                c.add(key)
         return c
 
     def _opts(self):
@@ -307,18 +359,13 @@ class App:
         found, _ = L.parse_links(self.links.get("1.0", "end"))
         existing = set(self.fav_list.get(0, "end"))
         added = 0
-        for _site, _user, _url in found:
-            raw = self._profile_link(_site, _user, _url)
-            if raw and raw not in existing:
-                self.fav_list.insert("end", raw)
-                existing.add(raw)
+        for _site, _user, url in found:
+            if url and url not in existing:
+                self.fav_list.insert("end", url)
+                existing.add(url)
                 added += 1
         self._save()
         self.v_status.set(f"Added {added} to favorites." if added else "Nothing new to add.")
-
-    @staticmethod
-    def _profile_link(site, user, url):
-        return url if url.startswith("http") or url.startswith(("snapfull:", "threads:")) else url
 
     def _fav_remove(self):
         for i in reversed(self.fav_list.curselection()):
@@ -331,6 +378,7 @@ class App:
         if not items:
             messagebox.showinfo("Favorites", "No favorites to download.")
             return
+        self.tabs.set("Download")
         self._start("\n".join(items))
 
     # ---------- download
@@ -362,7 +410,6 @@ class App:
             os.makedirs(j["out"], exist_ok=True)
         spec = {"jobs": jobs, "status_dir": self.status_dir, "lane": 1,
                 "lanes": [self.status_dir]}
-        # clear old progress
         for f in engine.paths(self.status_dir) + (engine.files_path(self.status_dir),):
             try:
                 os.remove(f)
@@ -371,7 +418,7 @@ class App:
         self.log.delete("1.0", "end")
         self._log_pos = 0
         self.running = True
-        self.btn.config(text="Stop")
+        self.btn.configure(text="■  Stop")
         self.v_status.set(f"Downloading {len(jobs)} link(s)…")
         if bad:
             self._append("Skipped (not supported): " + ", ".join(bad[:5]) + "\n")
@@ -399,12 +446,12 @@ class App:
         if st.get("status"):
             self.v_status.set(st["status"])
         total, seen = st.get("total") or 0, st.get("seen") or 0
-        self.prog["value"] = min(seen / total, 1) if total else 0
+        self.prog.set(min(seen / total, 1) if total else 0)
         state = st.get("state")
         if state in ("done", "error", "cancelled") and not self._engine_running():
             self.running = False
-            self.btn.config(text="Download")
-            self.prog["value"] = 1 if state == "done" else 0
+            self.btn.configure(text="⬇  Download")
+            self.prog.set(1 if state == "done" else 0)
             return
         self.root.after(500, self._poll)
 
@@ -423,7 +470,7 @@ class App:
 
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     App(root)
     root.mainloop()
 
