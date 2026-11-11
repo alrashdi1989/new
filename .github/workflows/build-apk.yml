@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write        # needed to publish the APK as a Release
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -59,3 +62,22 @@ jobs:
         with:
           name: x-media-downloader-apk
           path: out/MediaDownloader.apk
+
+      - name: Read app version
+        id: ver
+        run: echo "v=$(grep -m1 '^version' buildozer.spec | sed 's/.*= *//')" >> "$GITHUB_OUTPUT"
+
+      - name: Publish APK as a Release (public, no login needed)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.v }}
+          name: Media Downloader v${{ steps.ver.outputs.v }}
+          files: out/MediaDownloader.apk
+          make_latest: true
+          body: |
+            Media Downloader v${{ steps.ver.outputs.v }}
+
+            Download **MediaDownloader.apk** below and install it (no GitHub login needed).
+            The latest version is always at:
+            https://github.com/alrashdi1989/new/releases/latest/download/MediaDownloader.apk
