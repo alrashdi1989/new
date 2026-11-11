@@ -1,0 +1,56 @@
+name: probe-threads
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Threads profile or post URL
+        required: true
+        default: https://www.threads.com/@natgeo
+
+jobs:
+  probe:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests gallery-dl yt-dlp
+      - name: Fetch and inspect
+        env:
+          URL: ${{ github.event.inputs.url }}
+        run: |
+          python3 - <<'PY'
+          import os, re, json, sys
+          import requests
+          sys.path.insert(0, ".")
+          import threadsext
+          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+          url = os.environ["URL"]
+          hdr = {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9",
+                 "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+          r = requests.get(url, headers=hdr, timeout=30)
+          html = r.text
+          print("STATUS", r.status_code, "FINAL", r.url, "LEN", len(html))
+          for m in ["image_versions2", "video_versions", "carousel_media", "taken_at",
+                    "thread_items", "__bbox", "BarcelonaProfile", "login", "LoginAndSignup",
+                    "polaris", "props", "require"]:
+              print("MARK", m, html.count(m))
+          blocks = re.findall(r'<script[^>]+type="application/json"[^>]*>(.*?)</script>', html, re.S)
+          print("JSON_SCRIPT_BLOCKS", len(blocks))
+          posts = threadsext.posts_from_html(html)
+          print("POSTS_FOUND", len(posts))
+          if posts:
+              p = posts[0]
+              print("POST_KEYS", sorted(p.keys())[:40])
+              print("MEDIA", threadsext.post_media(p)[:3])
+          else:
+              i = html.find("image_versions2")
+              if i == -1:
+                  i = html.find("video_versions")
+              if i != -1:
+                  print("SAMPLE_AROUND_MEDIA", html[max(0, i-400):i+600])
+              else:
+                  print("HEAD", html[:1500])
+          PY
