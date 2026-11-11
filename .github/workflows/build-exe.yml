@@ -1,0 +1,87 @@
+name: build-exe
+on:
+  push:
+    branches: [main]
+    paths:
+      - desktop.py
+      - engine.py
+      - links.py
+      - ytjob.py
+      - storyjoin.py
+      - snapext.py
+      - threadsext.py
+      - avatars.py
+      - .github/workflows/build-exe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller gallery-dl yt-dlp av requests certifi
+
+      - name: Get ffmpeg
+        shell: pwsh
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_dl
+          $exe = (Get-ChildItem ffmpeg_dl -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName
+          Copy-Item $exe -Destination ffmpeg.exe
+          Get-Item ffmpeg.exe | Select-Object Name, Length
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path desktop.py -Pattern 'APP_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          "v=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build exe
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --onefile --console --name MediaDownloader `
+            --collect-submodules gallery_dl --collect-data gallery_dl `
+            --collect-submodules yt_dlp `
+            --collect-all av `
+            --hidden-import engine --hidden-import links --hidden-import ytjob `
+            --hidden-import storyjoin --hidden-import snapext --hidden-import threadsext `
+            --hidden-import avatars --hidden-import quickjob `
+            --add-binary "ffmpeg.exe;." `
+            desktop.py
+          Get-Item dist/MediaDownloader.exe | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: media-downloader-exe
+          path: dist/MediaDownloader.exe
+
+      - name: Publish exe to a Release (public, no login needed)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop
+          name: Media Downloader for Windows
+          files: dist/MediaDownloader.exe
+          make_latest: false
+          body: |
+            Media Downloader for Windows v${{ steps.ver.outputs.v }}
+
+            Download **MediaDownloader.exe** below and run it (no install needed).
+            Permanent link to the newest Windows version:
+            https://github.com/alrashdi1989/new/releases/download/desktop/MediaDownloader.exe
+
+            Windows SmartScreen may warn because the app isn't code-signed:
+            click **More info -> Run anyway**.

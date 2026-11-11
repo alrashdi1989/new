@@ -193,6 +193,8 @@ def run(job):
     }
     if yt.get("ffmpeg_location"):
         opts["ffmpeg_location"] = yt["ffmpeg_location"]
+    if yt.get("cookiesfrombrowser"):               # desktop: reuse the browser's logins
+        opts["cookiesfrombrowser"] = tuple(yt["cookiesfrombrowser"])
 
     rc, result = 1, "error"
     try:
