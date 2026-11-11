@@ -19,7 +19,7 @@ from tkinter import filedialog, messagebox, StringVar, BooleanVar, Listbox
 import engine
 import links as L
 
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 
 # ---- palette (glassy dark) ------------------------------------------------
 BG = "#0d1024"
@@ -57,6 +57,46 @@ def config_dir():
     d = os.path.join(base, "MediaDownloader")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _app_path():
+    """The launched .exe (when frozen) or this script."""
+    if getattr(sys, "frozen", False):
+        return sys.executable
+    return os.path.abspath(__file__)
+
+
+def make_shortcuts(desktop=True, start_menu=True):
+    """Create Desktop and Start-menu shortcuts to this app. Windows only.
+    Returns (ok, message)."""
+    if sys.platform != "win32":
+        return False, "Shortcuts are only created on Windows."
+    import subprocess
+    target = _app_path()
+    workdir = os.path.dirname(target)
+    places = []
+    if desktop:
+        places.append('[Environment]::GetFolderPath("Desktop")')
+    if start_menu:
+        places.append('([Environment]::GetFolderPath("StartMenu") + "\\Programs")')
+    ps = (
+        "$W = New-Object -ComObject WScript.Shell; "
+        f"$places = @({','.join(places)}); "
+        "foreach ($d in $places) { "
+        "  $lnk = Join-Path $d 'Media Downloader.lnk'; "
+        "  $s = $W.CreateShortcut($lnk); "
+        f"  $s.TargetPath = '{target}'; "
+        f"  $s.IconLocation = '{target},0'; "
+        f"  $s.WorkingDirectory = '{workdir}'; "
+        "  $s.Description = 'Media Downloader'; "
+        "  $s.Save() }"
+    )
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                       creationflags=0x08000000, timeout=20, check=True)
+        return True, "Shortcut added to your Desktop and Start menu."
+    except Exception as e:
+        return False, f"Couldn't create the shortcut: {e}"
 
 
 SETTINGS = os.path.join(config_dir(), "settings.json")
@@ -133,6 +173,28 @@ class App:
         self._build_ui()
         self._restore()
         self._try_acrylic()
+        self._first_run_shortcuts()
+
+    def _first_run_shortcuts(self):
+        """On the very first run, add a desktop + Start-menu shortcut automatically."""
+        if sys.platform == "win32" and not self.s.get("shortcuts_made"):
+            ok, _msg = make_shortcuts()
+            if ok:
+                self.s["shortcuts_made"] = True
+                save_settings(self.s)
+                self.v_status.set("Added a shortcut to your Desktop and Start menu. "
+                                  "To pin it to the taskbar, right-click the icon → Pin to taskbar.")
+
+    def _add_shortcut(self):
+        ok, msg = make_shortcuts()
+        self.v_status.set(msg)
+        if ok:
+            messagebox.showinfo(
+                "Shortcut added",
+                "A 'Media Downloader' shortcut is now on your Desktop and in the Start menu.\n\n"
+                "To pin it to the taskbar (Windows doesn't let apps do this automatically):\n"
+                "• While the app is open, right-click its taskbar icon → Pin to taskbar, or\n"
+                "• Right-click the desktop shortcut → Show more options → Pin to taskbar.")
 
     def _try_acrylic(self):
         """Windows 11: put a real frosted-glass backdrop behind the window."""
@@ -186,6 +248,9 @@ class App:
                      font=ctk.CTkFont(size=22, weight="bold"), text_color=FG).pack(side="left")
         ctk.CTkLabel(header, text=f"v{APP_VERSION}", text_color=MUT,
                      font=ctk.CTkFont(size=12)).pack(side="left", padx=8, pady=(8, 0))
+        ctk.CTkButton(header, text="★  Add desktop shortcut", width=170, command=self._add_shortcut,
+                      fg_color=CARD, hover_color=CARD2, text_color=FG,
+                      corner_radius=10).pack(side="right", pady=(4, 0))
 
         self.tabs = ctk.CTkTabview(r, fg_color=BG, segmented_button_fg_color=CARD,
                                    segmented_button_selected_color=ACC,

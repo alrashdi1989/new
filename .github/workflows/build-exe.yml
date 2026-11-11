@@ -30,7 +30,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller gallery-dl yt-dlp av requests certifi customtkinter pywinstyles
+          pip install pyinstaller gallery-dl yt-dlp av requests certifi customtkinter pywinstyles pillow
+
+      - name: Make app icon
+        shell: pwsh
+        run: |
+          python -c "from PIL import Image; Image.open('icon.png').save('icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+          Get-Item icon.ico | Select-Object Name, Length
 
       - name: Get ffmpeg
         shell: pwsh
@@ -53,6 +59,7 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --onefile --console --name MediaDownloader `
+            --icon icon.ico `
             --collect-submodules gallery_dl --collect-data gallery_dl `
             --collect-submodules yt_dlp `
             --collect-all av `
