@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "6.7"
+APP_VERSION = "6.8"
 
 
 
@@ -945,10 +945,19 @@ KV = """
                                     on_state: root.save_content()
                             Chip:
                                 id: c_join
-                                text: "Stories as one video (keeps the parts too)"
+                                text: "Stories as one video"
                                 font_size: "13sp"
                                 size_hint_y: None
                                 height: dp(40)
+                                on_state: root.save_content()
+                            Chip:
+                                id: c_only
+                                text: "    ↳ keep only the combined video"
+                                font_size: "12sp"
+                                size_hint_y: None
+                                height: dp(36) if root.join_on else 0
+                                opacity: 1 if root.join_on else 0
+                                disabled: not root.join_on
                                 on_state: root.save_content()
                             Widget:
                                 size_hint_y: None
@@ -1791,6 +1800,7 @@ class Root(FloatLayout):
     link_count = NumericProperty(0)
     thumb_count = NumericProperty(0)
     fav_count = NumericProperty(0)
+    join_on = BooleanProperty(False)
     tab = StringProperty("download")
     tab_title = StringProperty("Save from X, TikTok, Snapchat & more")
     status_line = StringProperty("")
@@ -1905,10 +1915,15 @@ class Root(FloatLayout):
     def content(self):
         return {k for k, i in self.CONTENT_IDS.items() if self.ids[i].state == "down"}
 
+    def story_only_combined(self):
+        return self.ids.c_join.state == "down" and self.ids.c_only.state == "down"
+
     def save_content(self):
+        self.join_on = self.ids.c_join.state == "down"
         if getattr(self, "_restoring", False) or not hasattr(self, "store"):
             return
-        self.store.put("content", picked=sorted(self.content()))
+        self.store.put("content", picked=sorted(self.content()),
+                       only_combined=self.story_only_combined())
 
     def save_include(self):
         if getattr(self, "_restoring", False) or not hasattr(self, "store"):
@@ -2174,11 +2189,15 @@ class Root(FloatLayout):
                 self.ids[f"par{k}"].state = "down" if k == n else "normal"
             self._restoring = False
         if not self.store.exists("content"):
+            self.join_on = self.ids.c_join.state == "down"
             return
-        picked = set(self.store.get("content")["picked"])
+        data = self.store.get("content")
+        picked = set(data["picked"])
         self._restoring = True
         for k, i in self.CONTENT_IDS.items():
             self.ids[i].state = "down" if k in picked else "normal"
+        self.ids.c_only.state = "down" if data.get("only_combined") else "normal"
+        self.join_on = self.ids.c_join.state == "down"
         self._restoring = False
 
     # ---- favorites ----
@@ -2882,6 +2901,7 @@ class Root(FloatLayout):
                 "out": out, "out_label": pretty_path(out), "site": site, "user": user,
                 "status_dir": self.status_dir, "rename": self.rename_files(),
                 "join_stories": "join" in content and "stories" in content,
+                "story_only_combined": self.story_only_combined(),
             })
         return jobs, None
 

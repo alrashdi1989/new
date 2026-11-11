@@ -255,6 +255,30 @@ class Job:
                 self.log(f"+ {name}  (story video from {n} parts)")
                 self.record_file(out)
                 self.new_files.append(out)
+                if self.spec.get("story_only_combined"):
+                    self._delete_story_parts(files)
+
+    def _delete_story_parts(self, files):
+        """Keep only the combined video: remove the separate story parts, and
+        take them out of the Gallery too."""
+        gone = []
+        for p in files:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+                gone.append(p)
+            except OSError as e:
+                self.log(f"Couldn't remove a story part ({e})")
+        # drop them from this run's lists so they aren't counted or re-scanned as present
+        self.new_files = [p for p in self.new_files if p not in set(gone)]
+        self.job_files = [p for p in self.job_files if p not in set(gone)]
+        self.count = max(0, self.count - len(gone))
+        try:
+            self.scan(gone)                 # refresh so the Gallery drops the deleted parts
+        except Exception:
+            pass
+        if gone:
+            self.log(f"Kept only the combined video; removed {len(gone)} separate parts.")
 
     VIDEO_SIBLINGS = (".mp4", ".mov", ".m4v", ".webm")
 

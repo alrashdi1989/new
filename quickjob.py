@@ -54,6 +54,7 @@ def build_quick(text, data_dir):
     reposts = _get(store, "include", "reposts", False)
     rename = _get(store, "names", "rename", True)
     content = set(_get(store, "content", "picked", None) or default_content())
+    only_combined = bool(_get(store, "content", "only_combined", False))
     status_dir = os.path.join(data_dir, "job")
 
     jobs = []
@@ -84,6 +85,7 @@ def build_quick(text, data_dir):
             "out": out, "out_label": links.pretty_path(out), "site": site, "user": user,
             "status_dir": status_dir, "rename": rename,
             "join_stories": "join" in content and "stories" in content,
+            "story_only_combined": only_combined,
         })
 
     for i, j in enumerate(jobs, 1):

@@ -162,3 +162,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v6.7
 - **Less heat / battery use:** capped the screen refresh at 30fps (Kivy was redrawing at 60 the whole time the app was open), stopped the on-screen progress poll while the app is in the background (downloads keep running in their service), slowed the poll to 1s, gave the download wake lock a 30-minute limit so a stalled download can no longer keep the CPU awake, and made the floating-button service wake less often.
+
+## v6.8
+- **Stories: keep only the combined video.** When "Stories as one video" is on, a sub-option "keep only the combined video" appears. Turn it on and the separate story parts are removed after the combined video is made (and taken out of the Gallery too), so only the single video is saved.
