@@ -171,3 +171,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v6.9
 - **Fixed the stuck "a download is running" message.** If a download finished while the app was in the background, the app could stay stuck thinking it was still running (so you could not start a new one). It now reconciles on reopening: it shows the final result and clears the busy state, and also recovers if a download was interrupted.
+
+## v7.0
+- **WhatsApp status saver.** In the Files tab there is now a "WhatsApp statuses" entry at the top. It shows the statuses you have already viewed in WhatsApp (WhatsApp keeps a temporary copy on your phone that it deletes after about a day). Select the ones you want and tap Save to keep them permanently in a "WhatsApp Status" folder and in your Gallery. It only reads your phone, never the internet, and only shows what you have already opened. Android only. Works with WhatsApp and WhatsApp Business.

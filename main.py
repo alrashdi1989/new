@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "6.9"
+APP_VERSION = "7.0"
 
 
 
@@ -1177,9 +1177,9 @@ KV = """
                             width: dp(110)
                             on_release: root.files_select_all()
                         PrimaryButton:
-                            text: "Delete %d" % root.files_selected if root.files_selected else "Tap files to select"
+                            text: (("Save %d" % root.files_selected) if root.files_mode == "whatsapp" else ("Delete %d" % root.files_selected)) if root.files_selected else "Tap files to select"
                             disabled: not root.files_selected
-                            on_release: root.files_delete_selected()
+                            on_release: root.files_save_selected() if root.files_mode == "whatsapp" else root.files_delete_selected()
 
             Screen:
                 name: "settings"
@@ -1663,6 +1663,45 @@ def human_size(n):
         n /= 1024
 
 
+def whatsapp_status_files():
+    """Statuses WhatsApp has cached on this phone (the ones you've already viewed).
+    They live in hidden .Statuses folders and WhatsApp deletes them after ~a day."""
+    try:
+        from android.storage import primary_external_storage_path  # type: ignore
+        root = primary_external_storage_path()
+    except Exception:
+        root = "/storage/emulated/0"
+    rels = [
+        "Android/media/com.whatsapp/WhatsApp/Media/.Statuses",
+        "WhatsApp/Media/.Statuses",                                  # older phones
+        "Android/media/com.whatsapp.w4b/WhatsApp Business/Media/.Statuses",
+        "WhatsApp Business/Media/.Statuses",
+    ]
+    files, seen = [], set()
+    for rel in rels:
+        d = os.path.join(root, *rel.split("/"))
+        if not os.path.isdir(d):
+            continue
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            if n.startswith(".") or n in seen:
+                continue
+            if not n.lower().endswith(VIDEO_EXTS + IMAGE_EXTS):
+                continue
+            p = os.path.join(d, n)
+            try:
+                mt = os.path.getmtime(p)
+            except OSError:
+                continue
+            seen.add(n)
+            files.append((mt, p))
+    files.sort(reverse=True)
+    return [p for _, p in files]
+
+
 def scan_downloads(save_dir):
     """Accounts found in the download folder, grouped the way the app saves them."""
     site_of = {v: k for k, v in FOLDERS.items()}
@@ -1807,6 +1846,7 @@ class Root(FloatLayout):
     files_account = StringProperty("")
     files_title = StringProperty("Your downloads")
     files_selecting = BooleanProperty(False)
+    files_mode = StringProperty("downloads")
     files_selected = NumericProperty(0)
     app_version = StringProperty(APP_VERSION)
     toast_text = StringProperty("")
@@ -2597,8 +2637,10 @@ class Root(FloatLayout):
 
         def work():
             accounts = scan_downloads(save_dir)
+            wa = whatsapp_status_files() if platform == "android" else []
             def done(*_):
                 self._files_cache, self._files_cache_t = accounts, time.time()
+                self._wa_cache = wa
                 if self.tab == "files" and not self.files_account:
                     self._files_render_accounts(accounts)
             Clock.schedule_once(done)
@@ -2609,6 +2651,7 @@ class Root(FloatLayout):
         self.files_title = "Your downloads"
         box = self.ids.files_box
         box.clear_widgets()
+        self._add_whatsapp_row(box)
         if not accounts:
             box.add_widget(Label(
                 text="Nothing downloaded yet in\n" + pretty_path(self.save_dir),
@@ -2661,7 +2704,101 @@ class Root(FloatLayout):
                 box.add_widget(row)
         self.ids.files_scroll.scroll_y = 1
 
+    def _add_whatsapp_row(self, box):
+        """A pinned entry at the top of Files that opens WhatsApp statuses."""
+        if platform != "android":
+            return
+        n = len(getattr(self, "_wa_cache", None) or [])
+        row = ButtonBehaviorBox(size_hint_y=None, height=dp(54), spacing=dp(10),
+                                padding=[dp(10), dp(6)])
+        from kivy.graphics import Color, RoundedRectangle
+        with row.canvas.before:
+            Color(0.09, 0.51, 0.33, .22)        # WhatsApp green tint
+            rr = RoundedRectangle(radius=[dp(14)])
+        row.bind(pos=lambda w, *_, r=rr: setattr(r, "pos", w.pos),
+                 size=lambda w, *_, r=rr: setattr(r, "size", w.size))
+        from kivy.factory import Factory
+        badge = Factory.SiteBadge(text="WA", badge=(0.09, 0.51, 0.33, 1), ink=(1, 1, 1, 1))
+        badge.size = (dp(32), dp(32))
+        badge.font_size = "11sp"
+        row.add_widget(badge)
+        sub = f"{n} to save" if n else "open a status in WhatsApp first"
+        info = Label(text=f"[b]WhatsApp statuses[/b]\n[size=12sp][color=ffffff99]{sub}"
+                          "[/color][/size]", markup=True, font_size="14sp", halign="left",
+                     valign="middle", max_lines=2)
+        info.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
+        row.add_widget(info)
+        row.add_widget(Label(text="›", font_size="22sp", size_hint_x=None, width=dp(20),
+                             color=(1, 1, 1, .5)))
+        row.bind(on_release=lambda *_: self.files_show_whatsapp())
+        box.add_widget(row)
+
+    def files_show_whatsapp(self):
+        self.files_mode = "whatsapp"
+        self._files_acc = {"name": "WhatsApp statuses", "site": "whatsapp"}
+        self.files_account = "whatsapp"
+        self.files_title = "WhatsApp statuses"
+        self.files_selecting = False
+        self.files_selected = 0
+        box = self.ids.files_box
+        box.clear_widgets()
+        box.add_widget(Label(text="Looking for viewed statuses…", font_size="13sp",
+                             color=(1, 1, 1, .6), size_hint_y=None, height=dp(40)))
+
+        def work():
+            paths = whatsapp_status_files()
+            self._wa_cache = paths
+
+            def done(*_):
+                if self.files_mode != "whatsapp":
+                    return
+                if not paths:
+                    box.clear_widgets()
+                    box.add_widget(Label(
+                        text="No statuses to save yet.\n\nOpen a contact's status in WhatsApp, "
+                             "then come back here — anything you've viewed shows up, and you can "
+                             "save it before WhatsApp deletes it.",
+                        font_size="13sp", color=(1, 1, 1, .6), size_hint_y=None, height=dp(120),
+                        halign="center", valign="middle"))
+                    box.children[0].bind(size=lambda w, *_: setattr(w, "text_size",
+                                                                    (w.width * .9, None)))
+                    return
+                self._files_render_grid(paths)
+            Clock.schedule_once(done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def files_save_selected(self):
+        paths = [t.path for t in self._files_tiles() if t.selected]
+        if not paths:
+            return
+        dest = os.path.join(self.save_dir, "WhatsApp Status")
+        os.makedirs(dest, exist_ok=True)
+        saved = []
+        import shutil
+        for p in paths:
+            try:
+                out = os.path.join(dest, os.path.basename(p))
+                if os.path.exists(out):
+                    stem, ext = os.path.splitext(os.path.basename(p))
+                    out = os.path.join(dest, f"{stem}_{int(time.time())}{ext}")
+                shutil.copy2(p, out)
+                saved.append(out)
+            except OSError as e:
+                self.write(f"Couldn't save one status ({e})")
+        try:
+            media_scan(saved)                 # show them in the Gallery
+        except Exception:
+            pass
+        self.toast(f"Saved {len(saved)} status{'es' if len(saved) != 1 else ''} to "
+                   + pretty_path(dest))
+        self.files_selecting = False
+        self.files_selected = 0
+        for t in self._files_tiles():
+            t.selecting = False
+            t.selected = False
+
     def files_show(self, account):
+        self.files_mode = "downloads"
         self._files_acc = account
         self.files_account = account["path"]
         self.files_title = f"{account['name']} · {SITE_NAMES.get(account['site'], '')}"
@@ -2751,6 +2888,7 @@ class Root(FloatLayout):
 
     def files_back(self):
         self.files_account = ""
+        self.files_mode = "downloads"
         self.files_selecting = False
         self.files_selected = 0
         self._files_render_accounts(getattr(self, "_files_cache", None) or [])
