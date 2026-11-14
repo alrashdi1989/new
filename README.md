@@ -168,3 +168,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## Desktop (Windows) v1.0
 - **Windows .exe version** of the app, same download engine. Reuses ffmpeg and your browser logins (pick your browser under "Use logins from browser"). Download, Favorites, options, profile+time names, and stories-as-one-video all work. Built on a Windows runner and published to the "desktop" release.
+
+## v6.9
+- **Fixed the stuck "a download is running" message.** If a download finished while the app was in the background, the app could stay stuck thinking it was still running (so you could not start a new one). It now reconciles on reopening: it shows the final result and clears the busy state, and also recovers if a download was interrupted.

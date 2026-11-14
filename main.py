@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "6.8"
+APP_VERSION = "6.9"
 
 
 
@@ -3000,15 +3000,29 @@ class Root(FloatLayout):
         self._lanes = saved.get("dirs") or [self.status_dir]
         self._lane_links = saved.get("links") or [1] * len(self._lanes)
         self._started, self._fallback = 0, False
+        now = time.time()
         sts = [engine.read_status(d) for d in self._lanes]
-        if any(st and st.get("state") == "running" and time.time() - st.get("beat", 0) < 45
-               for st in sts):
+        active = any(st and st.get("state") == "running" and now - st.get("beat", 0) < 45
+                     for st in sts)
+        if active:
             self.busy = True
             self.set_state(BUSY)
             self._log_pos = {}
             self.log.text = ""
             self.clear_thumbs()
             self._watch_job()
+        elif self.busy:
+            # The app was showing a running download, but it has since finished or
+            # stopped while the app was in the background. Reconcile so the "busy"
+            # state can't get stuck (this was the "a download is running" that never
+            # cleared).
+            if not any(sts):
+                self.busy = False
+                self.set_state(OK)
+                self.set_status("Ready.")
+            else:
+                self._started = now - 120      # treat any missing worker as finished
+                self._watch_job()              # one tick renders the result and clears busy
 
     MAX_THUMBS = 30
 
