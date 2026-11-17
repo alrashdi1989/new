@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - run: pip install requests
-      - name: Inspect the profile page
+      - name: Inspect the RSC flight data
         env:
           USER: ${{ github.event.inputs.user }}
         run: |
@@ -22,33 +22,33 @@ jobs:
           UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                 "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
           user = os.environ["USER"]
-          url = f"https://www.snapchat.com/add/{user}"
-          s = requests.Session()
-          s.headers.update({"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"})
-          r = s.get(url, timeout=30)
+          r = requests.get(f"https://www.snapchat.com/add/{user}",
+                           headers={"User-Agent": UA, "Accept-Language": "en-US,en"}, timeout=30)
           html = r.text
-          print("STATUS", r.status_code, "FINAL", r.url, "LEN", len(html))
-          for m in ['id="__NEXT_DATA__"', "__NEXT_DATA__", "snapList", '"story"',
-                    "spotlightHighlights", "curatedHighlights", "publicProfileInfo",
-                    "__remixContext", "window.__INITIAL", "application/json",
-                    "buildId", "mediaUrl", "snapUrls", "awsm-blocked", "captcha",
-                    "are you a robot", "rate limit"]:
-              print("MARK", repr(m), html.count(m))
-          # list all <script> json ids
-          ids = re.findall(r'<script[^>]*id="([^"]+)"[^>]*type="application/json"', html)
-          print("JSON_SCRIPT_IDS", ids[:20])
-          i = html.find('id="__NEXT_DATA__"')
-          if i != -1:
-              j = html.find(">", i) + 1
-              k = html.find("</script>", j)
-              blob = html[j:k]
-              print("NEXTDATA_LEN", len(blob), "STARTS", repr(blob[:60]))
+          chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html)
+          print("CHUNKS", len(chunks))
+          flight = ""
+          for c in chunks:
               try:
-                  data = json.loads(blob)
-                  pp = data.get("props", {}).get("pageProps", {})
-                  print("PAGEPROPS_KEYS", sorted(pp.keys())[:30])
-              except Exception as e:
-                  print("NEXTDATA_PARSE_ERR", repr(e))
-          else:
-              print("HEAD", html[:800])
+                  flight += json.loads('"' + c + '"')
+              except Exception:
+                  pass
+          print("FLIGHT_LEN", len(flight))
+          # media URLs
+          media = sorted(set(re.findall(r'https://[a-z0-9.-]*sc-cdn\.net/[^\s"\\]+', flight)))
+          print("MEDIA_URLS", len(media))
+          for u in media[:6]:
+              print("  U", u[:120])
+          # key discovery: what fields sit near a media url / story
+          for key in ['"story"', '"highlight"', '"spotlight"', "snapId", "snapMediaType",
+                      "mediaType", "timestampInSec", "timestamp", "snapUrls", "mediaUrl",
+                      "mediaPreviewUrl", "snapList", "storyId", "title"]:
+              print("KEY", key, flight.count(key))
+          i = flight.find('"story"')
+          if i != -1:
+              print("AROUND_STORY", flight[i-40:i+600])
+          m = re.search(r'sc-cdn\.net/', flight)
+          if m:
+              j = m.start()
+              print("AROUND_MEDIA", flight[j-200:j+150])
           PY
