@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - run: pip install requests
-      - name: Inspect the RSC flight data
+      - name: Validate the parser
         env:
           USER: ${{ github.event.inputs.user }}
         run: |
@@ -25,30 +25,62 @@ jobs:
           r = requests.get(f"https://www.snapchat.com/add/{user}",
                            headers={"User-Agent": UA, "Accept-Language": "en-US,en"}, timeout=30)
           html = r.text
-          chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html)
-          print("CHUNKS", len(chunks))
-          flight = ""
-          for c in chunks:
-              try:
-                  flight += json.loads('"' + c + '"')
-              except Exception:
-                  pass
-          print("FLIGHT_LEN", len(flight))
-          # media URLs
-          media = sorted(set(re.findall(r'https://[a-z0-9.-]*sc-cdn\.net/[^\s"\\]+', flight)))
-          print("MEDIA_URLS", len(media))
-          for u in media[:6]:
-              print("  U", u[:120])
-          # key discovery: what fields sit near a media url / story
-          for key in ['"story"', '"highlight"', '"spotlight"', "snapId", "snapMediaType",
-                      "mediaType", "timestampInSec", "timestamp", "snapUrls", "mediaUrl",
-                      "mediaPreviewUrl", "snapList", "storyId", "title"]:
-              print("KEY", key, flight.count(key))
-          i = flight.find('"story"')
-          if i != -1:
-              print("AROUND_STORY", flight[i-40:i+600])
-          m = re.search(r'sc-cdn\.net/', flight)
-          if m:
-              j = m.start()
-              print("AROUND_MEDIA", flight[j-200:j+150])
+
+          def flight(html):
+              chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html)
+              out = []
+              for c in chunks:
+                  try:
+                      out.append(json.loads('"' + c + '"'))
+                  except Exception:
+                      pass
+              return "".join(out)
+
+          def balanced(s, start):
+              depth = 0; i = start; instr = False; esc = False
+              while i < len(s):
+                  ch = s[i]
+                  if esc: esc = False
+                  elif ch == "\\": esc = True
+                  elif ch == '"': instr = not instr
+                  elif not instr:
+                      if ch == "{": depth += 1
+                      elif ch == "}":
+                          depth -= 1
+                          if depth == 0: return s[start:i+1]
+                  i += 1
+              return None
+
+          f = flight(html)
+          playbacks, seen_obj = [], 0
+          for m in re.finditer(r'\{"playback":', f):
+              obj = balanced(f, m.start())
+              if not obj: continue
+              seen_obj += 1
+              try: playbacks.append(json.loads(obj))
+              except Exception: pass
+          print("PLAYBACK_OBJECTS", seen_obj, "PARSED_OK", len(playbacks))
+
+          from collections import Counter
+          kinds = Counter()
+          items_total = Counter()
+          snaps = []
+          seen = set()
+          for d in playbacks:
+              pb = d.get("playback", {})
+              kind = pb.get("kind")
+              kinds[kind] += 1
+              for it in pb.get("sequence", {}).get("items", []):
+                  iid = it.get("id"); src = it.get("src")
+                  if not src or iid in seen: continue
+                  seen.add(iid)
+                  items_total[it.get("kind")] += 1
+                  snaps.append((kind, it.get("kind"), pb.get("title"), src))
+          print("PLAYBACK_KINDS", dict(kinds))
+          print("ITEM_KINDS", dict(items_total))
+          print("UNIQUE_SNAPS", len(snaps))
+          for s in snaps[:5]:
+              print("  SNAP", s[0], s[1], repr(s[2])[:30], s[3][:90])
+          vids = [s for s in snaps if s[1] == "video"]
+          print("VIDEO_SAMPLE", vids[0][3][:120] if vids else "none")
           PY
