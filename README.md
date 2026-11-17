@@ -174,3 +174,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v7.0
 - **WhatsApp status saver.** In the Files tab there is now a "WhatsApp statuses" entry at the top. It shows the statuses you have already viewed in WhatsApp (WhatsApp keeps a temporary copy on your phone that it deletes after about a day). Select the ones you want and tap Save to keep them permanently in a "WhatsApp Status" folder and in your Gallery. It only reads your phone, never the internet, and only shows what you have already opened. Android only. Works with WhatsApp and WhatsApp Business.
+
+## v7.1
+- **Fixed Snapchat.** Snapchat changed its website (it no longer embeds the data block the app read), which broke all Snapchat downloads with a "JSONDecodeError". The app now reads Snapchat's new page format. Note: Snapchat merged Stories and Highlights into one set, so picking either now downloads the same combined stories.

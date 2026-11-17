@@ -18,7 +18,7 @@ Internal URL form:  snapfull:<username>
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 from gallery_dl import extractor
 from gallery_dl.extractor.common import Message
@@ -146,7 +146,7 @@ class SnapchatFullExtractor(SnapchatExtractor):
                 date = None
                 if snap.get("dateMs"):
                     try:
-                        date = datetime.fromtimestamp(snap["dateMs"] / 1000, timezone.utc)
+                        date = datetime.utcfromtimestamp(snap["dateMs"] / 1000)
                     except (ValueError, OSError, TypeError):
                         date = None
                 data = {
