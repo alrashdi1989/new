@@ -11,87 +11,27 @@ jobs:
   probe:
     runs-on: ubuntu-22.04
     steps:
-      - run: pip install requests
-      - name: Validate the parser
+      - uses: actions/checkout@v4
+      - run: pip install gallery-dl requests
+      - name: Run the real extractor end to end
         env:
           USER: ${{ github.event.inputs.user }}
         run: |
           python3 - <<'PY'
-          import os, re, json
-          import requests
-          UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
-          user = os.environ["USER"]
-          r = requests.get(f"https://www.snapchat.com/add/{user}",
-                           headers={"User-Agent": UA, "Accept-Language": "en-US,en"}, timeout=30)
-          html = r.text
-
-          def flight(html):
-              chunks = re.findall(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)', html)
-              out = []
-              for c in chunks:
-                  try:
-                      out.append(json.loads('"' + c + '"'))
-                  except Exception:
-                      pass
-              return "".join(out)
-
-          def balanced(s, start):
-              depth = 0; i = start; instr = False; esc = False
-              while i < len(s):
-                  ch = s[i]
-                  if esc: esc = False
-                  elif ch == "\\": esc = True
-                  elif ch == '"': instr = not instr
-                  elif not instr:
-                      if ch == "{": depth += 1
-                      elif ch == "}":
-                          depth -= 1
-                          if depth == 0: return s[start:i+1]
-                  i += 1
-              return None
-
-          f = flight(html)
-          playbacks, seen_obj = [], 0
-          for m in re.finditer(r'\{"playback":', f):
-              obj = balanced(f, m.start())
-              if not obj: continue
-              seen_obj += 1
-              try: playbacks.append(json.loads(obj))
-              except Exception: pass
-          print("PLAYBACK_OBJECTS", seen_obj, "PARSED_OK", len(playbacks))
-
-          from collections import Counter
-          kinds = Counter()
-          items_total = Counter()
-          snaps = []
-          seen = set()
-          for d in playbacks:
-              pb = d.get("playback")
-              if not isinstance(pb, dict): continue
-              kind = pb.get("kind")
-              kinds[kind] += 1
-              seq = pb.get("sequence")
-              items = seq.get("items", []) if isinstance(seq, dict) else []
-              for it in items:
-                  if not isinstance(it, dict): continue
-                  iid = it.get("id"); src = it.get("src")
-                  if not src or not isinstance(src, str) or iid in seen: continue
-                  seen.add(iid)
-                  items_total[it.get("kind")] += 1
-                  snaps.append((kind, it.get("kind"), pb.get("title"), src))
-          print("PLAYBACK_KINDS", dict(kinds))
-          print("ITEM_KINDS", dict(items_total))
-          print("UNIQUE_SNAPS", len(snaps))
-          for s in snaps[:5]:
-              print("  SNAP", s[0], s[1], repr(s[2])[:30], s[3][:90])
-          vids = [s for s in snaps if s[1] == "video"]
-          imgs = [s for s in snaps if s[1] == "image"]
-          for label, lst in (("IMG", imgs), ("VID", vids)):
-              if lst:
-                  u = lst[0][3]
-                  h = requests.get(u, headers={"User-Agent": UA}, stream=True, timeout=30)
-                  cl = h.headers.get("content-length")
-                  print("DOWNLOAD", label, "status", h.status_code, "type",
-                        h.headers.get("content-type"), "len", cl)
+          import os
+          from gallery_dl import config, job
+          from gallery_dl.extractor.common import Message
+          import snapext
+          snapext.register()
+          config.set(("extractor", "snapchat"), "sections", "Story,Spotlight")
+          j = job.DataJob("snapfull:" + os.environ["USER"], file=open(os.devnull, "w"))
+          j.run()
+          urls = [m for m in j.data if m[0] == Message.Url]
+          dirs = [m for m in j.data if m[0] == Message.Directory]
+          print("DIRECTORIES", [d[2].get("section") for d in dirs])
+          print("URL_MESSAGES", len(urls))
+          for m in urls[:4]:
+              d = m[2]
+              print("  URL", d.get("section"), d.get("extension"), "date:", d.get("date"),
+                    "id:", d.get("id"), m[1][:70])
           PY

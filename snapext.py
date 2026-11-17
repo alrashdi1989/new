@@ -1,77 +1,162 @@
 """
 Snapchat add-on for the download engine.
 
-gallery-dl's own Snapchat profile support skips the current (24-hour) story.
-This extractor reads a public profile once and yields the current story,
-all saved highlights, and the Spotlight videos listed on the profile. Internal URL form:  snapfull:<username>
+Snapchat's website moved to Next.js' App Router: the profile page no longer
+embeds a __NEXT_DATA__ JSON block (which gallery-dl's own extractor needs), so
+the story/highlight/spotlight data now arrives as React "flight" chunks
+(self.__next_f.push([1,"..."])). This extractor reconstructs those chunks and
+reads the public profile's stories, highlights and Spotlight videos from them.
+
+Each piece of content is a {"playback":{...},"tile":{...}} object:
+  playback.kind         "story" (stories + saved highlights) or "spotlight"
+  playback.title        the tile's title
+  playback.dateMs       when it was posted (epoch ms)
+  playback.sequence.items[]  each: kind ("image"/"video"), id, src (media URL)
+
+Internal URL form:  snapfull:<username>
 """
+
+import json
+import re
+from datetime import datetime, timezone
 
 from gallery_dl import extractor
 from gallery_dl.extractor.common import Message
 from gallery_dl.extractor.snapchat import SnapchatExtractor
+
+_FLIGHT = re.compile(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)')
+
+
+def _flight_text(html):
+    """Rebuild the React flight stream from the page's __next_f chunks."""
+    out = []
+    for c in _FLIGHT.findall(html):
+        try:
+            out.append(json.loads('"' + c + '"'))
+        except ValueError:
+            pass
+    return "".join(out)
+
+
+def _balanced(s, start):
+    """Return the JSON object that starts at s[start] == '{' (brace-matched)."""
+    depth = 0
+    instr = esc = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if esc:
+            esc = False
+        elif ch == "\\":
+            esc = True
+        elif ch == '"':
+            instr = not instr
+        elif not instr:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return s[start:i + 1]
+    return None
+
+
+def parse_profile(html):
+    """All media on the profile, grouped. Returns a dict:
+    {"story": [snap, ...], "spotlight": [snap, ...]} where each snap is
+    {kind, id, src, title, dateMs}."""
+    flight = _flight_text(html)
+    groups = {"story": [], "spotlight": []}
+    seen = set()
+    for m in re.finditer(r'\{"playback":', flight):
+        obj = _balanced(flight, m.start())
+        if not obj:
+            continue
+        try:
+            d = json.loads(obj)
+        except ValueError:
+            continue
+        pb = d.get("playback")
+        if not isinstance(pb, dict):
+            continue
+        kind = pb.get("kind")
+        if kind not in groups:
+            continue
+        seq = pb.get("sequence")
+        items = seq.get("items", []) if isinstance(seq, dict) else []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            src, iid = it.get("src"), it.get("id")
+            if not src or not isinstance(src, str) or iid in seen:
+                continue
+            seen.add(iid)
+            groups[kind].append({
+                "kind": it.get("kind"), "id": iid or "", "src": src,
+                "title": pb.get("title") or "", "dateMs": pb.get("dateMs"),
+            })
+    return groups
 
 
 class SnapchatFullExtractor(SnapchatExtractor):
     subcategory = "full"
     pattern = r"snapfull:([^/?#\s]+)"
     example = "snapfull:username"
+    archive_fmt = "{file_id}"
 
     def items(self):
         user = self.groups[0]
-        page = self._request_next_data(f"{self.root}/@{user}")
-        page["user"] = user
+        html = self.request(f"{self.root}/@{user}").text
+        groups = parse_profile(html)
 
-        sections = []
-        story = page.get("story") or {}
-        if story.get("snapList"):
-            sections.append(("Story", story))
-        for highlight in page.get("curatedHighlights") or ():
-            if highlight.get("snapList"):
-                sections.append(("Highlights", highlight))
-        # Only the creator's own Spotlights listed on the profile page.
-        # (A Spotlight page's feed is mostly other people's videos, so it's not used.)
-        for spot in page.get("spotlightHighlights") or ():
-            if spot.get("snapList"):
-                sections.append(("Spotlight", spot))
-
+        # Snapchat merged current stories and saved highlights into one "story"
+        # kind, so Stories and Highlights now draw from the same set.
         wanted = self.config("sections")
         if wanted:
             if isinstance(wanted, str):
                 wanted = [w.strip() for w in wanted.split(",")]
             wanted = {w.lower() for w in wanted}
-            sections = [(n, g) for n, g in sections if n.lower() in wanted]
+        else:
+            wanted = {"story", "highlights", "spotlight"}
+        story_on = bool(wanted & {"story", "stories", "highlights"})
+        spot_on = "spotlight" in wanted
 
-        total = sum(len(group["snapList"]) for _, group in sections)
+        sections = []
+        if story_on and groups["story"]:
+            sections.append(("Story", groups["story"]))
+        if spot_on and groups["spotlight"]:
+            sections.append(("Spotlight", groups["spotlight"]))
+
+        total = sum(len(s) for _, s in sections)
         if not total:
-            if wanted and wanted <= {"none", ""}:
-                self.log.info("Nothing selected for Snapchat (pick Stories, Highlights or Spotlight)")
+            if wanted <= {"none", ""}:
+                self.log.info("Nothing selected for Snapchat (pick Stories, Highlights "
+                              "or Spotlight)")
             else:
                 self.log.info("@%s has nothing public in the selected sections right now", user)
-            yield Message.Directory, "", page
+            yield Message.Directory, "", {"user": user, "category": "snapchat"}
+            return
 
-        current = None
-        for section, group in sections:
-            if section != current:
-                current = section
-                yield Message.Directory, "", {"user": user, "section": section,
-                                              "category": "snapchat"}
-            for snap in group["snapList"]:
-                try:
-                    if section == "Spotlight":
-                        url, data = self._extract_spotlight_item(dict(group), snap)
-                    else:
-                        url, data = self._extract_story_item(dict(group), snap)
-                except Exception as exc:
-                    self.log.error("Skipped one snap (%s: %s)",
-                                   exc.__class__.__name__, exc)
-                    continue
-                data["user"] = user
-                data["section"] = section
-                preview = (snap.get("snapUrls") or {}).get("mediaPreviewUrl")
-                if preview and preview != url:
-                    data["_fallback"] = (preview,)
-                data["_total"] = total
-                yield Message.Url, url, data
+        num = 0
+        for section, snaps in sections:
+            yield Message.Directory, "", {"user": user, "section": section,
+                                          "category": "snapchat"}
+            for snap in snaps:
+                num += 1
+                is_video = snap["kind"] == "video"
+                date = None
+                if snap.get("dateMs"):
+                    try:
+                        date = datetime.fromtimestamp(snap["dateMs"] / 1000, timezone.utc)
+                    except (ValueError, OSError, TypeError):
+                        date = None
+                data = {
+                    "user": user, "section": section, "category": "snapchat",
+                    "subcategory": "full", "id": snap["id"][:16] or str(num),
+                    "file_id": snap["id"], "num": num, "title": snap["title"],
+                    "date": date, "_total": total,
+                    "extension": "mp4" if is_video else "jpg",
+                }
+                yield Message.Url, snap["src"], data
 
 
 _registered = False
