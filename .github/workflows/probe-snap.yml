@@ -86,5 +86,12 @@ jobs:
           for s in snaps[:5]:
               print("  SNAP", s[0], s[1], repr(s[2])[:30], s[3][:90])
           vids = [s for s in snaps if s[1] == "video"]
-          print("VIDEO_SAMPLE", vids[0][3][:120] if vids else "none")
+          imgs = [s for s in snaps if s[1] == "image"]
+          for label, lst in (("IMG", imgs), ("VID", vids)):
+              if lst:
+                  u = lst[0][3]
+                  h = requests.get(u, headers={"User-Agent": UA}, stream=True, timeout=30)
+                  cl = h.headers.get("content-length")
+                  print("DOWNLOAD", label, "status", h.status_code, "type",
+                        h.headers.get("content-type"), "len", cl)
           PY
