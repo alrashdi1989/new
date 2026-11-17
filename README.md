@@ -177,3 +177,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v7.1
 - **Fixed Snapchat.** Snapchat changed its website (it no longer embeds the data block the app read), which broke all Snapchat downloads with a "JSONDecodeError". The app now reads Snapchat's new page format. Note: Snapchat merged Stories and Highlights into one set, so picking either now downloads the same combined stories.
+
+## v7.2
+- **Snapchat profile photos restored** on favorites (read from Snapchat's new page format, same as the download fix).
