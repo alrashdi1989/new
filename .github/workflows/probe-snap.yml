@@ -67,12 +67,16 @@ jobs:
           snaps = []
           seen = set()
           for d in playbacks:
-              pb = d.get("playback", {})
+              pb = d.get("playback")
+              if not isinstance(pb, dict): continue
               kind = pb.get("kind")
               kinds[kind] += 1
-              for it in pb.get("sequence", {}).get("items", []):
+              seq = pb.get("sequence")
+              items = seq.get("items", []) if isinstance(seq, dict) else []
+              for it in items:
+                  if not isinstance(it, dict): continue
                   iid = it.get("id"); src = it.get("src")
-                  if not src or iid in seen: continue
+                  if not src or not isinstance(src, str) or iid in seen: continue
                   seen.add(iid)
                   items_total[it.get("kind")] += 1
                   snaps.append((kind, it.get("kind"), pb.get("title"), src))
