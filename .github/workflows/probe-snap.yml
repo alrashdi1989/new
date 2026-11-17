@@ -19,16 +19,22 @@ jobs:
         run: |
           python3 - <<'PY'
           import os
-          from gallery_dl import config, job
+          from gallery_dl import config, extractor
           from gallery_dl.extractor.common import Message
           import snapext
           snapext.register()
           config.set(("extractor", "snapchat"), "sections", "Story,Spotlight")
-          j = job.DataJob("snapfull:" + os.environ["USER"], file=open(os.devnull, "w"))
-          j.run()
-          urls = [m for m in j.data if m[0] == Message.Url]
-          dirs = [m for m in j.data if m[0] == Message.Directory]
-          print("DIRECTORIES", [d[2].get("section") for d in dirs])
+          ex = extractor.find("snapfull:" + os.environ["USER"])
+          ex.initialize()
+          urls, dirs = [], []
+          for msg in ex:
+              if not msg:
+                  continue
+              if msg[0] == Message.Url:
+                  urls.append(msg)
+              elif msg[0] == Message.Directory:
+                  dirs.append(msg)
+          print("DIRECTORIES", [d[-1].get("section") for d in dirs])
           print("URL_MESSAGES", len(urls))
           for m in urls[:4]:
               d = m[2]
