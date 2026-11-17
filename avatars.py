@@ -6,8 +6,13 @@ Finds the account's profile picture with the download engine's avatar readers
 """
 
 import io
+import json
 import os
+import re
 import time
+
+# Snapchat serves its data as React "flight" chunks now (see snapext.py).
+_SNAP_FLIGHT = re.compile(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)')
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
@@ -51,11 +56,29 @@ class _Quiet:
     info = warning = error = debug
 
 
+def _snapchat_avatar(name):
+    import requests
+    r = requests.get(f"https://www.snapchat.com/@{name}",
+                     headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}, timeout=30)
+    if r.status_code != 200:
+        return None
+    flight = []
+    for c in _SNAP_FLIGHT.findall(r.text):
+        try:
+            flight.append(json.loads('"' + c + '"'))
+        except ValueError:
+            pass
+    m = re.search(r'"profilePictureUrl":"(https://[^"]+)"', "".join(flight))
+    return m.group(1) if m else None
+
+
 def avatar_url(site, name, link, cookies=None):
     if site == "youtube":
         if "/playlist" in link or "watch?v=" in link:
             return None
         return _youtube_avatar(link)
+    if site == "snapchat":
+        return _snapchat_avatar(name)
     page = PAGES.get(site)
     if not page or not name:
         return None
