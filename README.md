@@ -180,3 +180,6 @@ Tap **×** to remove a favorite. Favorites are grouped by app; tap a group name 
 
 ## v7.2
 - **Snapchat profile photos restored** on favorites (read from Snapchat's new page format, same as the download fix).
+
+## v7.3
+- **Sync across devices (login).** Settings now has "Sync across devices": sign up or log in with an email and password, and your favorites and preferences sync automatically to every device you log in on (merged, so nothing is lost). Your app logins (Instagram/TikTok/etc.) stay on each device and are never synced. Uses your own private Firebase project.

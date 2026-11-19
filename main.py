@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.2"
+APP_VERSION = "7.3"
 
 
 
@@ -738,6 +738,90 @@ KV = """
             height: dp(46)
             on_release: root.dismiss()
 
+<AccountPopup>:
+    background: ""
+    background_color: 0, 0, 0, 0
+    overlay_color: 0, 0, 0, .6
+    size_hint: .9, None
+    height: acard.height
+    auto_dismiss: not self.busy
+    GlassCard:
+        id: acard
+        canvas.before:
+            Color:
+                rgba: .07, .09, .18, .98
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(24)]
+        padding: dp(22)
+        spacing: dp(12)
+        Label:
+            text: "Sync your favorites"
+            bold: True
+            font_size: "20sp"
+            size_hint_y: None
+            height: dp(30)
+            halign: "left"
+            text_size: self.size
+        Label:
+            text: "Log in (or sign up) to get the same saved accounts on every device."
+            font_size: "12sp"
+            color: 1, 1, 1, .6
+            size_hint_y: None
+            text_size: self.width, None
+            height: self.texture_size[1]
+            halign: "left"
+        GlassInput:
+            id: email
+            hint_text: "Email"
+            multiline: False
+            write_tab: False
+            size_hint_y: None
+            height: dp(48)
+        GlassInput:
+            id: pw
+            hint_text: "Password (at least 6 characters)"
+            password: True
+            multiline: False
+            write_tab: False
+            size_hint_y: None
+            height: dp(48)
+        Label:
+            text: root.error
+            color: 1, .4, .4, 1
+            font_size: "12sp"
+            size_hint_y: None
+            text_size: self.width, None
+            height: self.texture_size[1] if root.error else 0
+            halign: "left"
+        Label:
+            text: "Connecting…" if root.busy else ""
+            color: .4, .82, 1, 1
+            font_size: "12sp"
+            size_hint_y: None
+            height: dp(18) if root.busy else 0
+            halign: "left"
+            text_size: self.size
+        BoxLayout:
+            size_hint_y: None
+            height: dp(50)
+            spacing: dp(10)
+            GhostButton:
+                text: "Log in"
+                disabled: root.busy
+                on_release: root.submit(False)
+            PrimaryButton:
+                text: "Sign up"
+                disabled: root.busy
+                on_release: root.submit(True)
+        GhostButton:
+            text: "Cancel"
+            size_hint_y: None
+            height: dp(40)
+            disabled: root.busy
+            on_release: root.dismiss()
+
 <ConfirmPopup>:
     background: ""
     background_color: 0, 0, 0, 0
@@ -1195,6 +1279,48 @@ KV = """
                         padding: [0, 0, 0, dp(8)]
                         GlassCard:
                             Caption:
+                                text: "SYNC ACROSS DEVICES"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(48)
+                                spacing: dp(10)
+                                SiteBadge:
+                                    text: "SY"
+                                    badge: 0.30, 0.55, 0.95, 1
+                                    ink: 1, 1, 1, 1
+                                Label:
+                                    text: ("Synced as " + root.cloud_email) if root.cloud_email else "Not logged in"
+                                    font_size: "14sp"
+                                    halign: "left"
+                                    valign: "middle"
+                                    text_size: self.size
+                                    shorten: True
+                                    shorten_from: "right"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(44)
+                                spacing: dp(8)
+                                GhostButton:
+                                    text: "Sync now" if root.cloud_email else "Log in / Sign up"
+                                    disabled: root.cloud_busy
+                                    on_release: root.sync_now() if root.cloud_email else root.open_account()
+                                GhostButton:
+                                    text: "Log out"
+                                    size_hint_x: None
+                                    width: dp(100) if root.cloud_email else 0
+                                    opacity: 1 if root.cloud_email else 0
+                                    disabled: not root.cloud_email
+                                    on_release: root.cloud_logout()
+                            Label:
+                                id: sync_info
+                                text: root.cloud_status
+                                font_size: "12sp"
+                                color: 1, 1, 1, .55
+                                size_hint_y: None
+                                text_size: self.width, None
+                                height: self.texture_size[1]
+                                halign: "left"
+                            Caption:
                                 text: "X ACCOUNT"
                             BoxLayout:
                                 size_hint_y: None
@@ -1552,6 +1678,26 @@ class AccessPopup(ModalView):
         request_file_access()
 
 
+class AccountPopup(ModalView):
+    error = StringProperty("")
+    busy = BooleanProperty(False)
+
+    def __init__(self, on_submit=None, **kw):
+        self._on_submit = on_submit
+        super().__init__(**kw)
+
+    def submit(self, signup):
+        email = self.ids.email.text.strip()
+        pw = self.ids.pw.text
+        if not email or not pw:
+            self.error = "Enter your email and a password."
+            return
+        self.error = ""
+        self.busy = True
+        if self._on_submit:
+            self._on_submit(email, pw, signup, self)
+
+
 class ConfirmPopup(ModalView):
     title = StringProperty("")
     message = StringProperty("")
@@ -1852,6 +1998,10 @@ class Root(FloatLayout):
     toast_text = StringProperty("")
     fav_shown = NumericProperty(0)
     fav_query = StringProperty("")
+    cloud_email = StringProperty("")
+    cloud_busy = BooleanProperty(False)
+    cloud_status = StringProperty("Log in on any device to get the same favorites. Your "
+                                  "logins to the apps stay on each device.")
 
     def __init__(self, store, **kw):
         super().__init__(**kw)
@@ -1964,12 +2114,14 @@ class Root(FloatLayout):
             return
         self.store.put("content", picked=sorted(self.content()),
                        only_combined=self.story_only_combined())
+        self.sync_push()
 
     def save_include(self):
         if getattr(self, "_restoring", False) or not hasattr(self, "store"):
             return
         self.store.put("include", photos=self.images.active, videos=self.videos.active,
                        reposts=self.retweets.active)
+        self.sync_push()
 
     # ---- automatic favorites checks ----
     AUTO_IDS = {0: "auto0", 6: "auto6", 12: "auto12", 24: "auto24"}
@@ -2196,6 +2348,7 @@ class Root(FloatLayout):
         if getattr(self, "_restoring", False) or not hasattr(self, "store"):
             return
         self.store.put("names", rename=self.rename_files())
+        self.sync_push()
 
     def parallel(self):
         return 3 if self.ids.par3.state == "down" else 2 if self.ids.par2.state == "down" else 1
@@ -2204,6 +2357,7 @@ class Root(FloatLayout):
         if getattr(self, "_restoring", False) or not hasattr(self, "store"):
             return
         self.store.put("parallel", n=self.parallel())
+        self.sync_push()
 
     def restore_content(self):
         self._restoring = True
@@ -2244,6 +2398,163 @@ class Root(FloatLayout):
     def _favorites(self):
         return list(self.store.get("favorites")["items"]) if self.store.exists("favorites") else []
 
+    # ---- cloud sync (favorites + preferences) ----
+    SYNC_KEYS = ("favorites", "fav_groups", "content", "include", "names", "parallel")
+
+    def _collect_sync(self):
+        return {k: dict(self.store.get(k)) for k in self.SYNC_KEYS if self.store.exists(k)}
+
+    def _apply_sync(self, data, merge_favorites=True):
+        if "favorites" in data:
+            cloud_favs = data["favorites"].get("items", []) or []
+            if merge_favorites and self.store.exists("favorites"):
+                local = self.store.get("favorites").get("items", []) or []
+                seen = {f.get("link") for f in cloud_favs}
+                cloud_favs = cloud_favs + [f for f in local if f.get("link") not in seen]
+            self.store.put("favorites", items=cloud_favs)
+        for k in self.SYNC_KEYS:
+            if k != "favorites" and k in data:
+                self.store.put(k, **data[k])
+        self._restoring = True
+        try:
+            self.restore_content()
+        except Exception:
+            pass
+        self._restoring = False
+        self.refresh_favorites()
+
+    def cloud_restore(self):
+        if self.store.exists("cloud"):
+            self.cloud_email = self.store.get("cloud").get("email", "")
+            if self.cloud_email:
+                self.cloud_status = f"Synced as {self.cloud_email}."
+                Clock.schedule_once(lambda *_: self.sync_pull_apply(), 2)
+
+    def open_account(self):
+        AccountPopup(on_submit=self.cloud_do).open()
+
+    def cloud_logout(self):
+        if self.store.exists("cloud"):
+            self.store.delete("cloud")
+        self.cloud_email = ""
+        self.cloud_status = "Logged out on this device. Your favorites stay here."
+
+    def cloud_do(self, email, pw, signup, popup):
+        def work():
+            try:
+                import cloudsync
+                auth = cloudsync.sign_up(email, pw) if signup else cloudsync.sign_in(email, pw)
+                try:
+                    cloud = cloudsync.pull(auth["idToken"], auth["uid"])
+                except Exception:
+                    cloud = None
+
+                def apply(*_):
+                    self.store.put("cloud", **auth)
+                    self.cloud_email = auth["email"]
+                    if cloud and cloud.get("data"):
+                        self._apply_sync(cloud["data"], merge_favorites=True)
+                    popup.dismiss()
+                    self.cloud_status = f"Synced as {self.cloud_email}."
+                    self.toast("Logged in — your favorites are now synced.")
+                    self.sync_push()
+                Clock.schedule_once(apply)
+            except Exception as e:
+                msg = str(e)
+                Clock.schedule_once(lambda *_: (setattr(popup, "busy", False),
+                                                setattr(popup, "error", msg)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _cloud_token(self, cb):
+        """Call cb(idToken, uid) with a fresh token (or (None, None)). Runs where called."""
+        if not self.store.exists("cloud"):
+            cb(None, None)
+            return
+        c = dict(self.store.get("cloud"))
+        if time.time() < c.get("expiry", 0):
+            cb(c["idToken"], c["uid"])
+            return
+        try:
+            import cloudsync
+            c.update(cloudsync.refresh(c["refreshToken"]))
+            Clock.schedule_once(lambda *_: self.store.put("cloud", **c))
+            cb(c["idToken"], c["uid"])
+        except Exception:
+            cb(None, None)
+
+    def sync_now(self):
+        if not self.store.exists("cloud"):
+            return
+        self.cloud_busy = True
+        self.cloud_status = "Syncing…"
+
+        def work():
+            def with_token(idtok, uid):
+                if not idtok:
+                    Clock.schedule_once(lambda *_: self._sync_done("Couldn't sync — log in again."))
+                    return
+                import cloudsync
+                try:
+                    cloud = cloudsync.pull(idtok, uid)
+                except Exception as e:
+                    emsg = str(e)
+                    Clock.schedule_once(lambda *_: self._sync_done(emsg))
+                    return
+
+                def apply(*_):
+                    if cloud and cloud.get("data"):
+                        self._apply_sync(cloud["data"], merge_favorites=True)
+                    self.sync_push()
+                    self._sync_done(f"Synced as {self.cloud_email}.")
+                Clock.schedule_once(apply)
+            self._cloud_token(with_token)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _sync_done(self, msg):
+        self.cloud_busy = False
+        self.cloud_status = msg
+
+    def sync_pull_apply(self):
+        def work():
+            def with_token(idtok, uid):
+                if not idtok:
+                    return
+                import cloudsync
+                try:
+                    cloud = cloudsync.pull(idtok, uid)
+                except Exception:
+                    return
+                if cloud and cloud.get("data"):
+                    Clock.schedule_once(lambda *_: self._apply_sync(cloud["data"]))
+            self._cloud_token(with_token)
+        threading.Thread(target=work, daemon=True).start()
+
+    def sync_push(self):
+        if not self.store.exists("cloud"):
+            return
+        ev = getattr(self, "_sync_push_ev", None)
+        if ev:
+            ev.cancel()
+        self._sync_push_ev = Clock.schedule_once(lambda *_: self._do_push(), 2)
+
+    def _do_push(self):
+        if not self.store.exists("cloud"):
+            return
+        data = self._collect_sync()
+        updated = int(time.time() * 1000)
+
+        def work():
+            def with_token(idtok, uid):
+                if not idtok:
+                    return
+                import cloudsync
+                try:
+                    cloudsync.push(idtok, uid, data, updated)
+                except Exception:
+                    pass
+            self._cloud_token(with_token)
+        threading.Thread(target=work, daemon=True).start()
+
     def save_favorites(self):
         links, _ = parse_links(self.url.text)
         if not links:
@@ -2264,6 +2575,7 @@ class Root(FloatLayout):
         self.store.put("favorites", items=favs)
         self.refresh_favorites()
         self.write_auto_spec()
+        self.sync_push()
         self.set_status(f"Saved {added} to favorites." if added else "Already in your favorites.")
         self.set_state(OK if added else IDLE)
 
@@ -2281,6 +2593,7 @@ class Root(FloatLayout):
         self.store.put("favorites", items=favs)
         self.refresh_favorites()
         self.write_auto_spec()
+        self.sync_push()
         self.set_status("Removed from favorites.")
 
     def download_favorite(self, link):
@@ -3323,6 +3636,7 @@ class XMediaApp(App):
         Clock.schedule_once(lambda *_: (self.root_widget.write_auto_spec(),
                                         self.root_widget.arm_auto(),
                                         self.root_widget.arm_float()), 3)
+        Clock.schedule_once(lambda *_: self.root_widget.cloud_restore(), 1)
         Window.bind(on_keyboard=self._on_key)
         if platform == "android":
             try:
