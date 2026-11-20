@@ -29,6 +29,17 @@ class SyncError(Exception):
     pass
 
 
+def _detail(r):
+    """Pull Firebase's own error message out of a failed REST response."""
+    try:
+        err = (r.json() or {}).get("error", {})
+        msg = err.get("message") or err.get("status") or ""
+    except ValueError:
+        msg = (r.text or "")[:120]
+    msg = (msg or "").strip()
+    return f" ({r.status_code}: {msg})" if msg else f" ({r.status_code})"
+
+
 _MESSAGES = {
     "EMAIL_EXISTS": "That email already has an account — try Log in instead.",
     "INVALID_LOGIN_CREDENTIALS": "Wrong email or password.",
@@ -104,7 +115,7 @@ def pull(id_token, uid):
     if r.status_code == 404:
         return None
     if r.status_code != 200:
-        raise SyncError("Couldn't read your synced data.")
+        raise SyncError("Couldn't read your synced data." + _detail(r))
     fields = (r.json() or {}).get("fields", {})
     blob = fields.get("data", {}).get("stringValue")
     if not blob:
@@ -129,5 +140,5 @@ def push(id_token, uid, data, updated_ms):
     except requests.RequestException:
         raise SyncError("Couldn't reach the sync server.")
     if r.status_code != 200:
-        raise SyncError("Couldn't save your data to the server.")
+        raise SyncError("Couldn't save your data to the server." + _detail(r))
     return True
