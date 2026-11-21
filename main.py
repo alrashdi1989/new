@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.5"
+APP_VERSION = "7.6"
 
 
 
@@ -1320,6 +1320,32 @@ KV = """
                                 text_size: self.width, None
                                 height: self.texture_size[1]
                                 halign: "left"
+                            BoxLayout:
+                                size_hint_y: None
+                                height: dp(44)
+                                spacing: dp(8)
+                                Label:
+                                    text: "Sync my logins too"
+                                    font_size: "14sp"
+                                    halign: "left"
+                                    valign: "middle"
+                                    text_size: self.size
+                                Chip:
+                                    id: sync_logins_chip
+                                    text: "On" if self.state == "down" else "Off"
+                                    allow_no_selection: True
+                                    size_hint_x: None
+                                    width: dp(72)
+                                    font_size: "13sp"
+                                    on_state: root.set_sync_logins()
+                            Label:
+                                text: "Off by default. When on, your saved app logins (Instagram, X, TikTok, Facebook, Threads) travel to your other devices through your own private account. Passwords are never stored."
+                                font_size: "11sp"
+                                color: 1, 1, 1, .45
+                                size_hint_y: None
+                                text_size: self.width, None
+                                height: self.texture_size[1]
+                                halign: "left"
                             Caption:
                                 text: "X ACCOUNT"
                             BoxLayout:
@@ -2000,6 +2026,7 @@ class Root(FloatLayout):
     fav_query = StringProperty("")
     cloud_email = StringProperty("")
     cloud_busy = BooleanProperty(False)
+    sync_logins = BooleanProperty(False)
     cloud_status = StringProperty("Log in on any device to get the same favorites. Your "
                                   "logins to the apps stay on each device.")
 
@@ -2375,6 +2402,11 @@ class Root(FloatLayout):
         hours = self.store.get("auto").get("hours", 0) if self.store.exists("auto") else 0
         for h, i in self.AUTO_IDS.items():
             self.ids[i].state = "down" if h == hours else "normal"
+        login_sync = self.store.get("synclogins").get("on", False) \
+            if self.store.exists("synclogins") else False
+        self.sync_logins = bool(login_sync)
+        if "sync_logins_chip" in self.ids:
+            self.ids.sync_logins_chip.state = "down" if login_sync else "normal"
         self._restoring = False
         if self.store.exists("parallel"):
             n = self.store.get("parallel").get("n", 3)
@@ -2400,9 +2432,18 @@ class Root(FloatLayout):
 
     # ---- cloud sync (favorites + preferences) ----
     SYNC_KEYS = ("favorites", "fav_groups", "content", "include", "names", "parallel")
+    # Store keys that hold app logins (X is saved under "auth"; the rest under
+    # their site name). Only synced when the user turns on "Sync my logins".
+    LOGIN_KEYS = ("auth", "instagram", "tiktok", "facebook", "threads")
 
     def _collect_sync(self):
-        return {k: dict(self.store.get(k)) for k in self.SYNC_KEYS if self.store.exists(k)}
+        data = {k: dict(self.store.get(k)) for k in self.SYNC_KEYS if self.store.exists(k)}
+        if self.sync_logins:
+            logins = {k: dict(self.store.get(k)) for k in self.LOGIN_KEYS
+                      if self.store.exists(k)}
+            if logins:
+                data["_logins"] = logins
+        return data
 
     def _apply_sync(self, data, merge_favorites=True):
         if "favorites" in data:
@@ -2415,6 +2456,13 @@ class Root(FloatLayout):
         for k in self.SYNC_KEYS:
             if k != "favorites" and k in data:
                 self.store.put(k, **data[k])
+        if self.sync_logins and isinstance(data.get("_logins"), dict):
+            for k, v in data["_logins"].items():
+                if k in self.LOGIN_KEYS and isinstance(v, dict):
+                    self.store.put(k, **v)
+            Clock.schedule_once(lambda *_: self._refresh_login_buttons())
+            self._avatar_failed.clear()
+            Clock.schedule_once(self.fetch_avatars, 2)
         self._restoring = True
         try:
             self.restore_content()
@@ -2423,7 +2471,38 @@ class Root(FloatLayout):
         self._restoring = False
         self.refresh_favorites()
 
+    def _refresh_login_buttons(self):
+        """Reflect the saved logins in the Settings buttons after a sync."""
+        try:
+            if self.store.exists("auth"):
+                self.token.text = self.store.get("auth").get("token", "")
+                self.login_btn.text = "Signed in" if self.token.text else "Log in"
+            for site, (state_id, btn_id) in ROW_IDS.items():
+                signed = self.store.exists(site) and bool(
+                    self.store.get(site).get("cookies"))
+                self.ids[state_id].text = "Signed in" if signed else ""
+                self.ids[btn_id].text = "Sign out" if signed else "Log in"
+        except Exception:
+            pass
+
+    def set_sync_logins(self):
+        if getattr(self, "_restoring", False):
+            return
+        on = self.ids.sync_logins_chip.active
+        self.sync_logins = on
+        self.store.put("synclogins", on=on)
+        if on:
+            if self.cloud_email:
+                self.toast("Your logins will now sync to your other devices.")
+                self.sync_push()
+            else:
+                self.toast("Turned on. Log in above to start syncing your logins.")
+        else:
+            self.toast("Logins will no longer sync. They stay on this device.")
+
     def cloud_restore(self):
+        if self.store.exists("synclogins"):
+            self.sync_logins = bool(self.store.get("synclogins").get("on", False))
         if self.store.exists("cloud"):
             self.cloud_email = self.store.get("cloud").get("email", "")
             if self.cloud_email:
@@ -2926,6 +3005,8 @@ class Root(FloatLayout):
         Clock.schedule_once(_ok)
         self._avatar_failed.clear()          # retry profile photos with the new login
         Clock.schedule_once(self.fetch_avatars, 2)
+        if self.sync_logins and self.cloud_email:
+            Clock.schedule_once(lambda *_: self.sync_push())
         self.set_status(f"Logged in to {name}. Paste a link and tap Download.")
         self.set_state(OK)
 

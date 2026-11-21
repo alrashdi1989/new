@@ -5,8 +5,9 @@ Login is email + password through Firebase Authentication; the synced data is
 stored in Firestore under users/<uid>, as one JSON blob, so only the signed-in
 user can read or write their own document (enforced by the security rule).
 
-No Kivy here, so it can be reused. Only this user's favorites and preferences
-are synced — never logins, cookies or local folder paths.
+No Kivy here, so it can be reused. Favorites and preferences sync by default;
+app logins (session cookies) sync only if the user turns on "Sync my logins".
+Local folder paths and account passwords are never sent.
 """
 
 import json
