@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.6"
+APP_VERSION = "7.7"
 
 
 
@@ -1320,6 +1320,14 @@ KV = """
                                 text_size: self.width, None
                                 height: self.texture_size[1]
                                 halign: "left"
+                            Label:
+                                text: "Syncs automatically once a day while you're logged in."
+                                font_size: "11sp"
+                                color: 0.55, 0.8, 1, .8
+                                size_hint_y: None
+                                text_size: self.width, None
+                                height: self.texture_size[1]
+                                halign: "left"
                             BoxLayout:
                                 size_hint_y: None
                                 height: dp(44)
@@ -2500,6 +2508,28 @@ class Root(FloatLayout):
         else:
             self.toast("Logins will no longer sync. They stay on this device.")
 
+    def _data_dir(self):
+        return App.get_running_app().user_data_dir
+
+    def schedule_daily_sync(self, first_in=None):
+        """Turn on the once-a-day background sync (Android only)."""
+        if platform != "android":
+            return
+        try:
+            import syncjob
+            syncjob.schedule(_activity, self._data_dir(), first_in=first_in)
+        except Exception:
+            pass
+
+    def cancel_daily_sync(self):
+        if platform != "android":
+            return
+        try:
+            import syncjob
+            syncjob.cancel(_activity, self._data_dir())
+        except Exception:
+            pass
+
     def cloud_restore(self):
         if self.store.exists("synclogins"):
             self.sync_logins = bool(self.store.get("synclogins").get("on", False))
@@ -2508,6 +2538,7 @@ class Root(FloatLayout):
             if self.cloud_email:
                 self.cloud_status = f"Synced as {self.cloud_email}."
                 Clock.schedule_once(lambda *_: self.sync_pull_apply(), 2)
+                self.schedule_daily_sync()
 
     def open_account(self):
         AccountPopup(on_submit=self.cloud_do).open()
@@ -2517,6 +2548,7 @@ class Root(FloatLayout):
             self.store.delete("cloud")
         self.cloud_email = ""
         self.cloud_status = "Logged out on this device. Your favorites stay here."
+        self.cancel_daily_sync()
 
     def cloud_do(self, email, pw, signup, popup):
         def work():
@@ -2536,6 +2568,7 @@ class Root(FloatLayout):
                     popup.dismiss()
                     self.cloud_status = f"Synced as {self.cloud_email}."
                     self.toast("Logged in — your favorites are now synced.")
+                    self.schedule_daily_sync()
                     self.sync_push()
                 Clock.schedule_once(apply)
             except Exception as e:

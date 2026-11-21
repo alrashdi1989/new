@@ -45,6 +45,8 @@ LANE = int(spec.get("lane") or 1)                # several accounts at once: wor
 FG_ID, DONE_ID, CHANNEL = (1 if LANE == 1 else 10 + LANE), 2, "downloads"
 if spec.get("auto"):
     FG_ID, DONE_ID = 30, 31
+elif spec.get("synctask"):
+    FG_ID, DONE_ID = 32, 33
 notify_ok = True
 try:
     NotificationManager = autoclass("android.app.NotificationManager")
@@ -189,9 +191,29 @@ def run_auto():
         notify(text, done=True)
 
 
+def run_sync():
+    """Started by the daily alarm: sync with the cloud, then set the next alarm."""
+    import syncjob
+    data_dir = spec.get("data_dir") or ""
+    notify("Syncing your devices…")          # foreground services must show this
+    try:
+        syncjob.run_once(data_dir)
+    except Exception:
+        pass
+    try:
+        syncjob.schedule(service, data_dir)  # keep the daily chain going
+    except Exception:
+        pass
+
+
 if spec.get("auto"):
     try:
         run_auto()
+    finally:
+        finish()
+elif spec.get("synctask"):
+    try:
+        run_sync()
     finally:
         finish()
 elif spec.get("args") or spec.get("jobs"):
