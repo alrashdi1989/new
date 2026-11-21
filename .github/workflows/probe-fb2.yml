@@ -1,6 +1,10 @@
 name: Probe Firebase
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/probe-fb2.yml'
+# rev: 1
 
 jobs:
   probe:
