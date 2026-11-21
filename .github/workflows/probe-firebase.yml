@@ -1,0 +1,43 @@
+name: Probe Firebase
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe Firestore + Auth
+        run: |
+          set +e
+          KEY="AIzaSyDglLSKXJe5iqJ2VKmVhYSJl0HOvtRb-MU"
+          PROJ="media-downloader"
+          FS="https://firestore.googleapis.com/v1/projects/$PROJ/databases/(default)/documents"
+
+          echo "===== 1. SIGN UP a throwaway test account ====="
+          SU=$(curl -s -X POST \
+            "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$KEY" \
+            -H "Content-Type: application/json" \
+            --data '{"email":"ci-probe-'"$RANDOM"'@example.com","password":"probe123456","returnSecureToken":true}')
+          TOKEN=$(echo "$SU" | python3 -c "import sys,json;print(json.load(sys.stdin).get('idToken',''))")
+          MYUID=$(echo "$SU" | python3 -c "import sys,json;print(json.load(sys.stdin).get('localId',''))")
+          echo "signup_ok=$([ -n "$TOKEN" ] && echo yes || echo no)"
+
+          if [ -n "$TOKEN" ]; then
+            echo "===== 2. AUTHED write (PATCH) to users/\$uid ====="
+            curl -s -w "\nHTTP:%{http_code}\n" -X PATCH "$FS/users/$MYUID" \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              --data '{"fields":{"data":{"stringValue":"{\"ping\":1}"},"updated":{"integerValue":"1"}}}' ; echo
+
+            echo "===== 3. AUTHED read (GET) of users/\$uid ====="
+            curl -s -w "\nHTTP:%{http_code}\n" "$FS/users/$MYUID" \
+              -H "Authorization: Bearer $TOKEN" ; echo
+
+            echo "===== 4. Clean up: delete the test doc + account ====="
+            curl -s -o /dev/null -w "doc_delete HTTP:%{http_code}\n" -X DELETE "$FS/users/$MYUID" \
+              -H "Authorization: Bearer $TOKEN"
+            curl -s -o /dev/null -w "acct_delete HTTP:%{http_code}\n" -X POST \
+              "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$KEY" \
+              -H "Content-Type: application/json" \
+              --data '{"idToken":"'"$TOKEN"'"}'
+          fi
+          echo "===== done ====="
