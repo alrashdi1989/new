@@ -1,23 +1,22 @@
-"""Live check of the Snapchat downloader path. Run on a runner with internet."""
+"""Inspect Snapchat profile page structure to repair the parser."""
+import re
 import sys
 import requests
-
-import snapext
-from gallery_dl import extractor, config, job
-from gallery_dl.extractor.message import Message
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
 
-USERS = sys.argv[1:] or ["balhaf123", "dr_majoood", "team.snapchat"]
+USERS = sys.argv[1:] or ["balhaf123", "dr_majoood"]
 
-snapext.register()
-print("registered:", "snapchat-full" in [getattr(e, "subcategory", "")
-      or e.__name__ for e in []] or "ok")
+MARKERS = ['self.__next_f.push', '__NEXT_DATA__', '"playback"', '"spotlight"',
+           '"story"', '"sequence"', '"snapList"', '"snaps"', '"mediaUrl"',
+           '"snapUrl"', 'sc-cdn.net', 'bolt-gcdn', 'cf-st.sc-cdn',
+           '"storyTitle"', '"highlight"', 'application/json', '"@type"',
+           '"snapId"', '"timestamp"', 'data-json', '"publicProfileInfo"',
+           '"curatedHighlights"', '"spotlightHighlights"', '"savedStory"']
 
 for user in USERS:
     print("\n==================  @%s  ==================" % user)
-    # 1) raw page + parser
     try:
         html = requests.get("https://www.snapchat.com/@" + user,
                             headers={"User-Agent": UA,
@@ -26,35 +25,26 @@ for user in USERS:
     except Exception as e:
         print("  FETCH ERROR:", e)
         continue
-    print("  page bytes:", len(html))
-    groups = snapext.parse_profile(html)
-    ns, nsp = len(groups["story"]), len(groups["spotlight"])
-    print("  parse_profile -> story:%d  spotlight:%d" % (ns, nsp))
-    if groups["story"]:
-        s = groups["story"][0]
-        print("    first story:", s["kind"], (s["src"] or "")[:70])
-
-    # 2) the extractor the app actually invokes
-    try:
-        config.clear()
-        ex = extractor.find("snapfull:" + user)
-        ex.initialize()
-        urls, dirs = [], []
-        for msg in ex:
-            if msg[0] == Message.Url:
-                urls.append((msg[2].get("section"), msg[2].get("extension"), msg[1]))
-            elif msg[0] == Message.Directory:
-                dirs.append(msg[2].get("section"))
-        print("  extractor -> %d media across sections %s" % (len(urls), dirs))
-        # 3) confirm the first media really downloads
-        if urls:
-            sec, ext, url = urls[0]
-            r = requests.get(url, headers={"User-Agent": UA}, timeout=30, stream=True)
-            ct = r.headers.get("content-type")
-            size = len(r.raw.read(2048) or b"")
-            print("    download test: HTTP %s  type=%s  firstbytes=%d  ext=%s"
-                  % (r.status_code, ct, size, ext))
-    except Exception as e:
-        import traceback
-        print("  EXTRACTOR ERROR:", repr(e))
-        traceback.print_exc()
+    print("  bytes:", len(html))
+    for m in MARKERS:
+        c = html.count(m)
+        if c:
+            print("    %-26s x%d" % (m, c))
+    # find media-looking URLs
+    media = re.findall(r'https://[^"\\]+\.(?:mp4|jpg|jpeg|webp)[^"\\]*', html)
+    print("  media-ish urls:", len(media))
+    for u in media[:3]:
+        print("     ", u[:90])
+    # show a window around the first 'playback' or 'story' or 'snap'
+    for key in ('"playback"', '"snapList"', '"story"', '"spotlight"', '"snaps"'):
+        i = html.find(key)
+        if i != -1:
+            print("  context around %s:" % key)
+            print("   ", html[i-40:i+220].replace("\n", " "))
+            break
+    # list all <script> types / ld+json blocks
+    scripts = re.findall(r'<script[^>]*type="application/(?:ld\+)?json"[^>]*>(.{0,120})',
+                         html)
+    print("  json script blocks:", len(scripts))
+    for s in scripts[:2]:
+        print("     ", s[:110].replace("\n", " "))
