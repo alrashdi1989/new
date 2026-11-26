@@ -100,10 +100,17 @@ def run_once(data_dir):
         remote = cloudsync.pull(idt, uid)
     except Exception:
         remote = None
+    import dlarchive
     if remote and remote.get("data"):
         apply(store, remote["data"], merge_favorites=True)
+        if isinstance(remote["data"].get("_archive"), list):
+            dlarchive.merge_entries(data_dir, remote["data"]["_archive"])
+    payload = collect(store)
+    ent = dlarchive.for_sync(data_dir)
+    if ent:
+        payload["_archive"] = ent        # "already downloaded" list, cross-device
     try:
-        cloudsync.push(idt, uid, collect(store), int(time.time() * 1000))
+        cloudsync.push(idt, uid, payload, int(time.time() * 1000))
     except Exception:
         pass
     store["_lastsync"] = {"time": time.time()}

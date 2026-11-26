@@ -178,14 +178,16 @@ def parse_links(text):
 
 
 def build_args(site, url, out_dir, auth_token, images, videos, retweets, site_cookies=None,
-               site_ua=None, content=None, rename=False):
+               site_ua=None, content=None, rename=False, archive=None):
     content = set(content) if content is not None else {"stories", "highlights", "posts", "spotlight"}
     exts = (IMAGE_EXT if images else ()) + (VIDEO_EXT if videos else ())
     if site == "facebook" and videos:
         exts += ("m4a",)           # Facebook sends a video's sound as a separate file
     args = [
         "-d", out_dir,
-        "--download-archive", os.path.join(out_dir, ".downloaded.sqlite3"),
+        # One global archive (shared across folders and synced between devices)
+        # when given; otherwise the old per-folder file.
+        "--download-archive", archive or os.path.join(out_dir, ".downloaded.sqlite3"),
         # Instagram: "merged" = the version with sound built in (the other kind needs
         # a desktop video tool to join picture and sound, which phones don't have)
         "-o", "videos=merged" if site == "instagram" else "videos=true",

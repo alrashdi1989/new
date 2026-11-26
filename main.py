@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.9"
+APP_VERSION = "7.10"
 
 
 
@@ -2444,6 +2444,31 @@ class Root(FloatLayout):
     # their site name). Only synced when the user turns on "Sync my logins".
     LOGIN_KEYS = ("auth", "instagram", "tiktok", "facebook", "threads")
 
+    def archive_path(self):
+        """The one global download archive, shared by all folders and synced."""
+        import dlarchive
+        return dlarchive.path(App.get_running_app().user_data_dir)
+
+    def migrate_archive_once(self):
+        """Fold old per-folder archives into the global one, once, in the
+        background, so switching to a single synced archive keeps what the
+        device already knows it downloaded."""
+        if self.store.exists("archmigrated"):
+            return
+
+        def work():
+            try:
+                import dlarchive
+                dlarchive.migrate_folders(App.get_running_app().user_data_dir,
+                                          getattr(self, "save_dir", ""))
+            except Exception:
+                pass
+            try:
+                self.store.put("archmigrated", done=True)
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
     def _collect_sync(self):
         data = {k: dict(self.store.get(k)) for k in self.SYNC_KEYS if self.store.exists(k)}
         if self.sync_logins:
@@ -2451,6 +2476,13 @@ class Root(FloatLayout):
                       if self.store.exists(k)}
             if logins:
                 data["_logins"] = logins
+        try:
+            import dlarchive
+            ent = dlarchive.for_sync(App.get_running_app().user_data_dir)
+            if ent:
+                data["_archive"] = ent      # "already downloaded" list, cross-device
+        except Exception:
+            pass
         return data
 
     def _apply_sync(self, data, merge_favorites=True):
@@ -2471,6 +2503,13 @@ class Root(FloatLayout):
             Clock.schedule_once(lambda *_: self._refresh_login_buttons())
             self._avatar_failed.clear()
             Clock.schedule_once(self.fetch_avatars, 2)
+        if isinstance(data.get("_archive"), list):
+            try:
+                import dlarchive
+                dlarchive.merge_entries(App.get_running_app().user_data_dir,
+                                        data["_archive"])
+            except Exception:
+                pass
         self._restoring = True
         try:
             self.restore_content()
@@ -3446,8 +3485,7 @@ class Root(FloatLayout):
                 gdl_out = os.path.join(out, "Images")
                 jobs.append({
                     # images fallback (main engine) if no video is found
-                    "args": ["-d", gdl_out, "--download-archive",
-                             os.path.join(gdl_out, ".downloaded.sqlite3"),
+                    "args": ["-d", gdl_out, "--download-archive", self.archive_path(),
                              "-o", "path-restrict=windows", "-o", "path-strip=windows", gurl],
                     "out": out, "out_label": pretty_path(out), "site": site, "user": user,
                     "status_dir": self.status_dir,
@@ -3462,7 +3500,8 @@ class Root(FloatLayout):
                                    if site in ROW_IDS and self.store.exists(site) else None,
                                    (self.store.get(site).get("ua") or login_ua())
                                    if site in ROW_IDS and self.store.exists(site) else None,
-                                   content, rename=self.rename_files()),
+                                   content, rename=self.rename_files(),
+                                   archive=self.archive_path()),
                 "out": out, "out_label": pretty_path(out), "site": site, "user": user,
                 "status_dir": self.status_dir, "rename": self.rename_files(),
                 "join_stories": "join" in content and "stories" in content,
@@ -3734,6 +3773,8 @@ class Root(FloatLayout):
             self._job_poll.cancel()
             self._job_poll = None
         Clock.schedule_once(self.fetch_avatars, 2)
+        if self.cloud_email:        # share the just-downloaded items with other devices
+            self.sync_push()
 
 
 class XMediaApp(App):
@@ -3751,6 +3792,7 @@ class XMediaApp(App):
                                         self.root_widget.arm_auto(),
                                         self.root_widget.arm_float()), 3)
         Clock.schedule_once(lambda *_: self.root_widget.cloud_restore(), 1)
+        Clock.schedule_once(lambda *_: self.root_widget.migrate_archive_once(), 4)
         Window.bind(on_keyboard=self._on_key)
         if platform == "android":
             try:
