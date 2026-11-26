@@ -1,21 +1,26 @@
 """
 Snapchat add-on for the download engine.
 
-Snapchat's website moved to Next.js' App Router: the profile page no longer
-embeds a __NEXT_DATA__ JSON block (which gallery-dl's own extractor needs), so
-the story/highlight/spotlight data now arrives as React "flight" chunks
-(self.__next_f.push([1,"..."])). This extractor reconstructs those chunks and
-reads the public profile's stories, highlights and Spotlight videos from them.
+Snapchat's public profile page keeps its data in a Next.js __NEXT_DATA__ JSON
+block again (it briefly used React "flight" chunks). This extractor reads that
+block and pulls the profile's story, saved highlights and Spotlight videos.
 
-Each piece of content is a {"playback":{...},"tile":{...}} object:
-  playback.kind         "story" (stories + saved highlights) or "spotlight"
-  playback.title        the tile's title
-  playback.dateMs       when it was posted (epoch ms)
-  playback.sequence.items[]  each: kind ("image"/"video"), id, src (media URL)
+Inside props.pageProps:
+  story                current story      -> {"snapList": [...]}  (or null)
+  curatedHighlights    saved highlights   -> [{"storyTitle", "snapList": [...]}]
+  spotlightHighlights  Spotlight          -> [{"snapList": [...]}]
+
+Each snap in a snapList:
+  snapMediaType        0 = image, 1 = video
+  snapUrls.mediaUrl    the media to download
+  snapId.value         id (may be empty for highlights)
+  timestampInSec.value when it was posted (epoch seconds)
+  snapTitle.value      optional title
 
 Internal URL form:  snapfull:<username>
 """
 
+import hashlib
 import json
 import re
 from datetime import datetime
@@ -24,76 +29,85 @@ from gallery_dl import extractor
 from gallery_dl.extractor.common import Message
 from gallery_dl.extractor.snapchat import SnapchatExtractor
 
-_FLIGHT = re.compile(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)')
+_NEXT = re.compile(
+    r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 
 
-def _flight_text(html):
-    """Rebuild the React flight stream from the page's __next_f chunks."""
+def _next_data(html):
+    """Return the parsed __NEXT_DATA__ JSON, or None."""
+    m = _NEXT.search(html)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(1))
+    except ValueError:
+        return None
+
+
+def _val(x):
+    """Snapchat wraps many scalars as {"value": ...}; unwrap them."""
+    if isinstance(x, dict):
+        return x.get("value")
+    return x
+
+
+def _snaps_from(group):
+    """Normalize one story/highlight group's snapList into snap dicts."""
     out = []
-    for c in _FLIGHT.findall(html):
+    if not isinstance(group, dict):
+        return out
+    gtitle = _val(group.get("storyTitle")) or ""
+    for s in group.get("snapList") or []:
+        if not isinstance(s, dict):
+            continue
+        urls = s.get("snapUrls") or {}
+        src = urls.get("mediaUrl")
+        if not src or not isinstance(src, str):
+            continue
+        ts = _val(s.get("timestampInSec"))
         try:
-            out.append(json.loads('"' + c + '"'))
-        except ValueError:
-            pass
-    return "".join(out)
-
-
-def _balanced(s, start):
-    """Return the JSON object that starts at s[start] == '{' (brace-matched)."""
-    depth = 0
-    instr = esc = False
-    for i in range(start, len(s)):
-        ch = s[i]
-        if esc:
-            esc = False
-        elif ch == "\\":
-            esc = True
-        elif ch == '"':
-            instr = not instr
-        elif not instr:
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return s[start:i + 1]
-    return None
+            ts = int(ts) if ts else None
+        except (ValueError, TypeError):
+            ts = None
+        sid = _val(s.get("snapId")) or ""
+        if not sid:                              # highlights often have no id
+            sid = hashlib.md5(src.split("?")[0].encode()).hexdigest()[:16]
+        out.append({
+            "kind": "video" if s.get("snapMediaType") == 1 else "image",
+            "id": sid, "src": src,
+            "title": _val(s.get("snapTitle")) or gtitle or "",
+            "ts": ts,
+        })
+    return out
 
 
 def parse_profile(html):
     """All media on the profile, grouped. Returns a dict:
     {"story": [snap, ...], "spotlight": [snap, ...]} where each snap is
-    {kind, id, src, title, dateMs}."""
-    flight = _flight_text(html)
+    {kind, id, src, title, ts}."""
     groups = {"story": [], "spotlight": []}
-    seen = set()
-    for m in re.finditer(r'\{"playback":', flight):
-        obj = _balanced(flight, m.start())
-        if not obj:
-            continue
-        try:
-            d = json.loads(obj)
-        except ValueError:
-            continue
-        pb = d.get("playback")
-        if not isinstance(pb, dict):
-            continue
-        kind = pb.get("kind")
-        if kind not in groups:
-            continue
-        seq = pb.get("sequence")
-        items = seq.get("items", []) if isinstance(seq, dict) else []
-        for it in items:
-            if not isinstance(it, dict):
+    data = _next_data(html)
+    if not data:
+        return groups
+    pp = ((data.get("props") or {}).get("pageProps")) or {}
+
+    # Story section = current story + saved highlights (Snapchat shows both
+    # under Stories now).
+    groups["story"] += _snaps_from(pp.get("story"))
+    for g in pp.get("curatedHighlights") or []:
+        groups["story"] += _snaps_from(g)
+    for g in pp.get("spotlightHighlights") or []:
+        groups["spotlight"] += _snaps_from(g)
+
+    for name, lst in groups.items():             # drop duplicates within a section
+        seen, uniq = set(), []
+        for s in lst:
+            key = s["src"].split("?")[0]
+            if key in seen:
                 continue
-            src, iid = it.get("src"), it.get("id")
-            if not src or not isinstance(src, str) or iid in seen:
-                continue
-            seen.add(iid)
-            groups[kind].append({
-                "kind": it.get("kind"), "id": iid or "", "src": src,
-                "title": pb.get("title") or "", "dateMs": pb.get("dateMs"),
-            })
+            seen.add(key)
+            uniq.append(s)
+        groups[name] = uniq
     return groups
 
 
@@ -108,8 +122,6 @@ class SnapchatFullExtractor(SnapchatExtractor):
         html = self.request(f"{self.root}/@{user}").text
         groups = parse_profile(html)
 
-        # Snapchat merged current stories and saved highlights into one "story"
-        # kind, so Stories and Highlights now draw from the same set.
         wanted = self.config("sections")
         if wanted:
             if isinstance(wanted, str):
@@ -144,9 +156,9 @@ class SnapchatFullExtractor(SnapchatExtractor):
                 num += 1
                 is_video = snap["kind"] == "video"
                 date = None
-                if snap.get("dateMs"):
+                if snap.get("ts"):
                     try:
-                        date = datetime.utcfromtimestamp(snap["dateMs"] / 1000)
+                        date = datetime.utcfromtimestamp(snap["ts"])
                     except (ValueError, OSError, TypeError):
                         date = None
                 data = {

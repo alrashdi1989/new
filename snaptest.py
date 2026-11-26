@@ -1,76 +1,71 @@
-"""Map the __NEXT_DATA__ JSON shape for the Snapchat parser rewrite."""
+"""Verify the rewritten Snapchat parser end-to-end + find the avatar field."""
 import json
 import re
 import sys
 import requests
 
+import snapext
+from gallery_dl import extractor, config
+from gallery_dl.extractor.message import Message
+
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
 
 USERS = sys.argv[1:] or ["dr_majoood", "balhaf123"]
+snapext.register()
 
 
-def grab(html):
-    m = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-                  html, re.S)
-    return json.loads(m.group(1)) if m else None
-
-
-def walk_keys(o, prefix="", depth=0, out=None):
-    if out is None:
-        out = []
-    if depth > 6:
-        return out
-    if isinstance(o, dict):
-        for k, v in o.items():
-            if k in ("story", "curatedHighlights", "spotlightHighlights",
-                     "spotlight", "publicProfileInfo", "snapList", "snapUrls",
-                     "props", "pageProps"):
-                out.append(prefix + "/" + k + "  (" + type(v).__name__ + ")")
-            walk_keys(v, prefix + "/" + k, depth + 1, out)
-    elif isinstance(o, list) and o:
-        walk_keys(o[0], prefix + "[0]", depth + 1, out)
-    return out
+def get(user):
+    return requests.get("https://www.snapchat.com/@" + user,
+                        headers={"User-Agent": UA,
+                                 "Accept-Language": "en-US,en;q=0.9"},
+                        timeout=30).text
 
 
 for user in USERS:
     print("\n==================  @%s  ==================" % user)
-    html = requests.get("https://www.snapchat.com/@" + user,
-                        headers={"User-Agent": UA,
-                                 "Accept-Language": "en-US,en;q=0.9"},
-                        timeout=30).text
-    data = grab(html)
-    if not data:
-        print("  no __NEXT_DATA__")
-        continue
-    for line in walk_keys(data):
-        print("  ", line)
-    try:
-        pp = data["props"]["pageProps"]
-        print("  pageProps keys:", list(pp.keys()))
-        info = pp.get("publicProfileInfo") or pp.get("userProfile") or {}
-        if isinstance(info, dict):
-            print("  profile-info keys:", list(info.keys())[:30])
-        # find a snapList anywhere and dump the first snap
-        found = []
+    html = get(user)
 
-        def hunt(o):
-            if isinstance(o, dict):
-                if "snapList" in o and isinstance(o["snapList"], list) and o["snapList"]:
-                    found.append((o.get("storyType"), o.get("storyTitle"),
-                                  o["snapList"][0]))
-                for v in o.values():
-                    hunt(v)
-            elif isinstance(o, list):
-                for v in o:
-                    hunt(v)
-        hunt(pp)
-        print("  snapList groups found:", len(found))
-        if found:
-            st, title, snap = found[0]
-            print("  first group storyType=%s title=%s" % (st, title))
-            print("  SNAP OBJECT:")
-            print(json.dumps(snap, indent=1)[:900])
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
+    g = snapext.parse_profile(html)
+    print("  parse_profile -> story:%d  spotlight:%d" % (len(g["story"]), len(g["spotlight"])))
+
+    config.clear()
+    ex = extractor.find("snapfull:" + user)
+    ex.initialize()
+    urls, dirs = [], []
+    for msg in ex:
+        if msg[0] == Message.Url:
+            urls.append((msg[2]["section"], msg[2]["extension"],
+                         msg[2]["num"], msg[1]))
+        elif msg[0] == Message.Directory:
+            if msg[2].get("section"):
+                dirs.append(msg[2]["section"])
+    print("  extractor -> %d media, sections=%s" % (len(urls), dirs))
+    vids = sum(1 for u in urls if u[1] == "mp4")
+    print("  images=%d videos=%d" % (len(urls) - vids, vids))
+
+    # download test: one image + one video
+    for want in ("jpg", "mp4"):
+        pick = next((u for u in urls if u[1] == want), None)
+        if not pick:
+            print("  no %s to test" % want)
+            continue
+        r = requests.get(pick[3], headers={"User-Agent": UA}, timeout=30, stream=True)
+        chunk = r.raw.read(4096) or b""
+        print("  download %s: HTTP %s type=%s bytes=%d"
+              % (want, r.status_code, r.headers.get("content-type"), len(chunk)))
+
+    # avatar field hunt in __NEXT_DATA__
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    data = json.loads(m.group(1))
+    pp = data["props"]["pageProps"]
+    info = (pp.get("userProfile") or {}).get("publicProfileInfo") or {}
+    print("  publicProfileInfo keys:", list(info.keys()))
+    for k in ("bitmoji3d", "bitmojiBackgroundUrl", "profilePictureUrl",
+              "snapcodeImageUrl", "imageUrl", "bitmojiSelfie"):
+        if k in info:
+            v = info[k]
+            print("    %s = %s" % (k, (json.dumps(v)[:90])))
+    # any url containing 'bitmoji' or 'profile'
+    for mm in re.findall(r'https://[^"\\]*(?:bitmoji|profile|snapcode)[^"\\]*', json.dumps(info))[:3]:
+        print("    avatar-ish:", mm[:90])
