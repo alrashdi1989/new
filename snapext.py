@@ -20,7 +20,6 @@ Each snap in a snapList:
 Internal URL form:  snapfull:<username>
 """
 
-import hashlib
 import json
 import re
 from datetime import datetime
@@ -51,6 +50,18 @@ def _val(x):
     return x
 
 
+def _media_id(src):
+    """The CDN's own media key, taken from the download URL itself, e.g.
+    https://cf-st.sc-cdn.net/d/kocsASE6WQYpTzOML1nHU.400?mo=...  ->
+    "kocsASE6WQYpTzOML1nHU". This is what we use to remember a snap has already
+    been downloaded: it is the same no matter how Snapchat restructures the
+    page, and it exists for every snap (stories, highlights and Spotlight),
+    unlike snapId which is blank for saved highlights. So a future change to the
+    page format won't make the app re-download files you already have."""
+    seg = src.split("?", 1)[0].rsplit("/", 1)[-1]   # last path part, no query
+    return seg.split(".", 1)[0] or seg              # drop size/variant suffix
+
+
 def _snaps_from(group):
     """Normalize one story/highlight group's snapList into snap dicts."""
     out = []
@@ -69,12 +80,9 @@ def _snaps_from(group):
             ts = int(ts) if ts else None
         except (ValueError, TypeError):
             ts = None
-        sid = _val(s.get("snapId")) or ""
-        if not sid:                              # highlights often have no id
-            sid = hashlib.md5(src.split("?")[0].encode()).hexdigest()[:16]
         out.append({
             "kind": "video" if s.get("snapMediaType") == 1 else "image",
-            "id": sid, "src": src,
+            "id": _media_id(src), "src": src,
             "title": _val(s.get("snapTitle")) or gtitle or "",
             "ts": ts,
         })
@@ -102,10 +110,9 @@ def parse_profile(html):
     for name, lst in groups.items():             # drop duplicates within a section
         seen, uniq = set(), []
         for s in lst:
-            key = s["src"].split("?")[0]
-            if key in seen:
+            if s["id"] in seen:
                 continue
-            seen.add(key)
+            seen.add(s["id"])
             uniq.append(s)
         groups[name] = uniq
     return groups

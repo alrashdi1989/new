@@ -1,36 +1,34 @@
-"""Check which stable fields each snap type has (for method-proof dedup)."""
-import json
-import re
+"""Verify extractor + that archive keys (file_id) are stable across fetches."""
 import sys
-import requests
+import snapext
+from gallery_dl import extractor, config
+from gallery_dl.extractor.message import Message
 
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
-USERS = sys.argv[1:] or ["balhaf123", "dr_majoood"]
+USERS = sys.argv[1:] or ["dr_majoood", "balhaf123"]
+snapext.register()
 
 
-def nd(html):
-    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
-    return json.loads(m.group(1)) if m else None
+def keys(user):
+    config.clear()
+    ex = extractor.find("snapfull:" + user)
+    ex.initialize()
+    out = []
+    for m in ex:
+        if m[0] == Message.Url:
+            out.append((m[2]["file_id"], m[2]["extension"], m[2]["section"]))
+    return out
 
 
 for user in USERS:
     print("\n===== @%s =====" % user)
-    html = requests.get("https://www.snapchat.com/@" + user,
-                        headers={"User-Agent": UA}, timeout=30).text
-    pp = nd(html)["props"]["pageProps"]
-    for label, node in (("story", pp.get("story")),
-                        ("curatedHighlights", (pp.get("curatedHighlights") or [None])[0]),
-                        ("spotlightHighlights", (pp.get("spotlightHighlights") or [None])[0])):
-        if not isinstance(node, dict):
-            print("  %-20s : none" % label)
-            continue
-        snaps = node.get("snapList") or []
-        print("  %-20s : %d snaps" % (label, len(snaps)))
-        if snaps:
-            s = snaps[0]
-            print("      snap keys:", list(s.keys()))
-            for k in ("snapId", "snapMediaType", "timestampInSec", "snapIndex"):
-                print("        %-16s = %s" % (k, json.dumps(s.get(k))[:80]))
-            mu = (s.get("snapUrls") or {}).get("mediaUrl", "")
-            print("        mediaUrl[:95] =", mu[:95])
+    a = keys(user)
+    b = keys(user)                      # fetch again -> keys must be identical
+    print("  media:", len(a))
+    print("  sample file_ids:", [k[0] for k in a[:3]])
+    sa, sb = {k[0] for k in a}, {k[0] for k in b}
+    print("  stable across two fetches:", sa == sb, "(%d keys both times)" % len(sa))
+    # keys must be non-empty and look like CDN ids (alnum), not md5/url
+    bad = [k[0] for k in a if not k[0] or len(k[0]) < 8]
+    print("  empty/short keys:", len(bad))
+    # uniqueness
+    print("  unique keys:", len(sa), "of", len(a))
