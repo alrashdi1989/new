@@ -11,8 +11,9 @@ import os
 import re
 import time
 
-# Snapchat serves its data as React "flight" chunks now (see snapext.py).
-_SNAP_FLIGHT = re.compile(r'self\.__next_f\.push\(\[1,\s*"((?:[^"\\]|\\.)*)"\]\)')
+# Snapchat keeps its data in a Next.js __NEXT_DATA__ JSON block (see snapext.py).
+_SNAP_NEXT = re.compile(
+    r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', re.S)
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0 Safari/537.36")
@@ -62,13 +63,18 @@ def _snapchat_avatar(name):
                      headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}, timeout=30)
     if r.status_code != 200:
         return None
-    flight = []
-    for c in _SNAP_FLIGHT.findall(r.text):
+    html = r.text
+    m = _SNAP_NEXT.search(html)
+    if m:
         try:
-            flight.append(json.loads('"' + c + '"'))
-        except ValueError:
+            pp = json.loads(m.group(1))["props"]["pageProps"]
+            info = (pp.get("userProfile") or {}).get("publicProfileInfo") or {}
+            url = info.get("profilePictureUrl")
+            if url:
+                return url
+        except (ValueError, KeyError, TypeError):
             pass
-    m = re.search(r'"profilePictureUrl":"(https://[^"]+)"', "".join(flight))
+    m = re.search(r'"profilePictureUrl":"(https://[^"\\]+)"', html)
     return m.group(1) if m else None
 
 
