@@ -31,7 +31,6 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.button import Button
 from kivy.uix.image import Image
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.carousel import Carousel  # noqa: F401 (used in KV)
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
@@ -46,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.11"
+APP_VERSION = "7.12"
 
 
 
@@ -869,48 +868,6 @@ KV = """
                 text: root.ok_text
                 on_release: root.confirm()
 
-<TutorialSlide@BoxLayout>:
-    orientation: "vertical"
-    title: ""
-    body: ""
-    icon: "M"
-    spacing: dp(14)
-    padding: dp(6)
-    AnchorLayout:
-        size_hint_y: None
-        height: dp(104)
-        Label:
-            size_hint: None, None
-            size: dp(90), dp(90)
-            text: root.icon
-            bold: True
-            font_size: "34sp"
-            color: .58, .86, 1, 1
-            halign: "center"
-            valign: "middle"
-            text_size: self.size
-            canvas.before:
-                Color:
-                    rgba: .40, .85, 1, .15
-                Ellipse:
-                    pos: self.pos
-                    size: self.size
-    Label:
-        text: root.title
-        bold: True
-        font_size: "21sp"
-        size_hint_y: None
-        height: self.texture_size[1]
-        text_size: self.width, None
-        halign: "center"
-    Label:
-        text: root.body
-        font_size: "15sp"
-        color: 1, 1, 1, .74
-        text_size: self.width, None
-        halign: "center"
-        valign: "top"
-
 <TutorialPopup>:
     background: ""
     background_color: 0, 0, 0, 0
@@ -921,7 +878,7 @@ KV = """
     GlassCard:
         id: tcard
         size_hint_y: None
-        height: dp(470)
+        height: dp(468)
         canvas.before:
             Color:
                 rgba: .07, .09, .18, .99
@@ -929,30 +886,77 @@ KV = """
                 pos: self.pos
                 size: self.size
                 radius: [dp(24)]
-        padding: dp(20)
-        spacing: dp(10)
-        AnchorLayout:
-            anchor_x: "right"
+        padding: dp(22)
+        spacing: dp(14)
+        BoxLayout:
             size_hint_y: None
             height: dp(26)
+            Label:
+                text: "Step %d of %d" % (root.index + 1, root.count)
+                font_size: "12sp"
+                color: 1, 1, 1, .45
+                halign: "left"
+                valign: "middle"
+                text_size: self.size
             Button:
                 text: "Skip"
-                size_hint: None, None
-                size: dp(64), dp(30)
+                size_hint: None, 1
+                width: dp(58)
                 background_normal: ""
                 background_color: 0, 0, 0, 0
                 color: 1, 1, 1, .5
                 font_size: "13sp"
                 on_release: root.finish()
-        Carousel:
-            id: carousel
-            on_index: root.index = self.index
-        Label:
-            text: root.dots_text
-            font_size: "20sp"
-            markup: True
+        AnchorLayout:
             size_hint_y: None
-            height: dp(24)
+            height: dp(92)
+            Label:
+                size_hint: None, None
+                size: dp(84), dp(84)
+                text: str(root.index + 1)
+                bold: True
+                font_size: "32sp"
+                color: .58, .86, 1, 1
+                halign: "center"
+                valign: "middle"
+                text_size: self.size
+                canvas.before:
+                    Color:
+                        rgba: .40, .85, 1, .15
+                    Ellipse:
+                        pos: self.pos
+                        size: self.size
+        Label:
+            text: root.cur_title
+            bold: True
+            font_size: "21sp"
+            size_hint_y: None
+            height: dp(34)
+            text_size: self.width, None
+            halign: "center"
+        Label:
+            text: root.cur_body
+            font_size: "15sp"
+            color: 1, 1, 1, .76
+            text_size: self.width, None
+            halign: "center"
+            valign: "top"
+        Widget:
+            size_hint_y: None
+            height: dp(6)
+            canvas:
+                Color:
+                    rgba: 1, 1, 1, .12
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.width, dp(6)
+                    radius: [dp(3)]
+                Color:
+                    rgba: .30, .86, .64, 1
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.width * ((root.index + 1) / root.count if root.count else 0), dp(6)
+                    radius: [dp(3)]
         PrimaryButton:
             size_hint_y: None
             height: dp(52)
@@ -1846,7 +1850,8 @@ class ConfirmPopup(ModalView):
 class TutorialPopup(ModalView):
     index = NumericProperty(0)
     count = NumericProperty(0)
-    dots_text = StringProperty("")
+    cur_title = StringProperty("")
+    cur_body = StringProperty("")
 
     SLIDES = [
         ("Welcome to Media Downloader",
@@ -1854,8 +1859,8 @@ class TutorialPopup(ModalView):
          "YouTube or almost any site, then tap Download. That's the whole idea."),
         ("Everything in four tabs",
          "Download, Favorites, Files and Settings sit along the bottom. Download "
-         "is where you paste links; Files is where your saved media — and WhatsApp "
-         "statuses — live."),
+         "is where you paste links; Files is where your saved media - and WhatsApp "
+         "statuses - live."),
         ("Favorites that check themselves",
          "Save the accounts you follow. The app can watch them and grab new posts "
          "for you automatically. Search them and sort them into groups."),
@@ -1864,43 +1869,28 @@ class TutorialPopup(ModalView):
          "to download higher-quality media and the posts only your account can see."),
         ("Sync across your devices",
          "Log into a sync account in Settings and your favorites, logins and "
-         "download history follow you to your other phones — kept in step "
+         "download history follow you to your other phones - kept in step "
          "automatically once a day."),
         ("The floating button",
          "Turn on the floating bubble to download a link you've copied from "
-         "anywhere, without opening the app first. You're all set — enjoy!"),
+         "anywhere, without opening the app first. You're all set - enjoy!"),
     ]
 
     def __init__(self, on_done=None, **kw):
         self._on_done = on_done
         super().__init__(**kw)
-        from kivy.factory import Factory
-        for i, (title, body) in enumerate(self.SLIDES):
-            slide = Factory.TutorialSlide()
-            slide.icon = str(i + 1)          # numbered step: always renders cleanly
-            slide.title = title
-            slide.body = body
-            self.ids.carousel.add_widget(slide)
         self.count = len(self.SLIDES)
-        self._update_dots()
+        self._show()
 
-    def on_index(self, *_):
-        self._update_dots()
-
-    def _update_dots(self):
-        dots = []
-        for i in range(self.count):
-            if i == self.index:
-                dots.append("[color=66d9ff]●[/color]")
-            else:
-                dots.append("[color=4d5570]●[/color]")
-        self.dots_text = " ".join(dots)
+    def _show(self):
+        self.cur_title, self.cur_body = self.SLIDES[self.index]
 
     def advance(self):
         if self.index >= self.count - 1:
             self.finish()
         else:
-            self.ids.carousel.load_next(mode="next")
+            self.index += 1
+            self._show()
 
     def finish(self):
         self.dismiss()
