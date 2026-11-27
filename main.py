@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.12"
+APP_VERSION = "7.13"
 
 
 
@@ -1687,6 +1687,69 @@ KV = """
                                     allow_no_selection: False
                                     font_size: "13sp"
                                     on_state: root.save_auto()
+                            Caption:
+                                text: "CHECK THESE APPS"
+                            GridLayout:
+                                cols: 4
+                                size_hint_y: None
+                                height: dp(86)
+                                spacing: dp(6)
+                                Chip:
+                                    id: as_x
+                                    text: "X"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
+                                Chip:
+                                    id: as_tiktok
+                                    text: "TikTok"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
+                                Chip:
+                                    id: as_snapchat
+                                    text: "Snapchat"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
+                                Chip:
+                                    id: as_instagram
+                                    text: "Instagram"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
+                                Chip:
+                                    id: as_threads
+                                    text: "Threads"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
+                                Chip:
+                                    id: as_facebook
+                                    text: "Facebook"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
+                                Chip:
+                                    id: as_youtube
+                                    text: "YouTube"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
+                                Chip:
+                                    id: as_web
+                                    text: "Websites"
+                                    allow_no_selection: True
+                                    font_size: "12sp"
+                                    state: "down"
+                                    on_state: root.save_auto_sites()
                             Label:
                                 id: auto_info
                                 text: "Gets new posts from all your favorites in the background and tells you what's new."
@@ -2311,9 +2374,25 @@ class Root(FloatLayout):
 
     # ---- automatic favorites checks ----
     AUTO_IDS = {0: "auto0", 6: "auto6", 12: "auto12", 24: "auto24"}
+    AUTO_SITE_IDS = {"x": "as_x", "tiktok": "as_tiktok", "snapchat": "as_snapchat",
+                     "instagram": "as_instagram", "threads": "as_threads",
+                     "facebook": "as_facebook", "youtube": "as_youtube", "web": "as_web"}
 
     def auto_hours(self):
         return next((h for h, i in self.AUTO_IDS.items() if self.ids[i].state == "down"), 0)
+
+    def enabled_auto_sites(self):
+        """Which platforms the background check should include (all by default)."""
+        d = self.store.get("autosites") if self.store.exists("autosites") else {}
+        return {s for s in self.AUTO_SITE_IDS if d.get(s, True)}
+
+    def save_auto_sites(self):
+        if getattr(self, "_restoring", False) or not hasattr(self, "store"):
+            return
+        vals = {s: (self.ids[i].state == "down") for s, i in self.AUTO_SITE_IDS.items()}
+        self.store.put("autosites", **vals)
+        self.write_auto_spec()        # next check uses the new selection
+        self.update_auto_info()
 
     def save_auto(self):
         if getattr(self, "_restoring", False) or not hasattr(self, "store"):
@@ -2334,6 +2413,9 @@ class Root(FloatLayout):
         data = autocheck.load(path)
         data["hours"] = self.auto_hours()
         links, _ = parse_links("\n".join(f["link"] for f in self._favorites()))
+        # only the platforms the user chose to check automatically
+        enabled = self.enabled_auto_sites()
+        links = [l for l in links if l[0] in enabled]
         # leave out sites that need a login you don't have yet
         links = [l for l in links if not (l[0] == "instagram" and not self.store.exists("instagram"))]
         jobs, problem = self.build_jobs(links) if links else ([], None)
@@ -2409,6 +2491,10 @@ class Root(FloatLayout):
             n = len((data.get("queue") or {}).get("jobs") or [])
             lines.append(f"Checks {n} favorite{'s' if n != 1 else ''} "
                          f"{'daily' if hours == 24 else f'every {hours} hours'}.")
+            off = [SITE_NAMES.get(s, s) for s in self.AUTO_SITE_IDS
+                   if s not in self.enabled_auto_sites()]
+            if off:
+                lines.append("Not checking: " + ", ".join(off) + ".")
             if data.get("next"):
                 lines.append("Next check: " + nice_time(data["next"]))
         last = data.get("last")
@@ -2561,6 +2647,9 @@ class Root(FloatLayout):
         hours = self.store.get("auto").get("hours", 0) if self.store.exists("auto") else 0
         for h, i in self.AUTO_IDS.items():
             self.ids[i].state = "down" if h == hours else "normal"
+        asites = self.store.get("autosites") if self.store.exists("autosites") else {}
+        for s, i in self.AUTO_SITE_IDS.items():
+            self.ids[i].state = "down" if asites.get(s, True) else "normal"
         login_sync = self.store.get("synclogins").get("on", False) \
             if self.store.exists("synclogins") else False
         self.sync_logins = bool(login_sync)
