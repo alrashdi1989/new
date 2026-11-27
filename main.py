@@ -31,6 +31,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.button import Button
 from kivy.uix.image import Image
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.carousel import Carousel  # noqa: F401 (used in KV)
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
@@ -45,7 +46,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.10"
+APP_VERSION = "7.11"
 
 
 
@@ -868,6 +869,96 @@ KV = """
                 text: root.ok_text
                 on_release: root.confirm()
 
+<TutorialSlide@BoxLayout>:
+    orientation: "vertical"
+    title: ""
+    body: ""
+    icon: "M"
+    spacing: dp(14)
+    padding: dp(6)
+    AnchorLayout:
+        size_hint_y: None
+        height: dp(104)
+        Label:
+            size_hint: None, None
+            size: dp(90), dp(90)
+            text: root.icon
+            bold: True
+            font_size: "34sp"
+            color: .58, .86, 1, 1
+            halign: "center"
+            valign: "middle"
+            text_size: self.size
+            canvas.before:
+                Color:
+                    rgba: .40, .85, 1, .15
+                Ellipse:
+                    pos: self.pos
+                    size: self.size
+    Label:
+        text: root.title
+        bold: True
+        font_size: "21sp"
+        size_hint_y: None
+        height: self.texture_size[1]
+        text_size: self.width, None
+        halign: "center"
+    Label:
+        text: root.body
+        font_size: "15sp"
+        color: 1, 1, 1, .74
+        text_size: self.width, None
+        halign: "center"
+        valign: "top"
+
+<TutorialPopup>:
+    background: ""
+    background_color: 0, 0, 0, 0
+    overlay_color: 0, 0, 0, .78
+    size_hint: .92, None
+    height: tcard.height
+    auto_dismiss: False
+    GlassCard:
+        id: tcard
+        size_hint_y: None
+        height: dp(470)
+        canvas.before:
+            Color:
+                rgba: .07, .09, .18, .99
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(24)]
+        padding: dp(20)
+        spacing: dp(10)
+        AnchorLayout:
+            anchor_x: "right"
+            size_hint_y: None
+            height: dp(26)
+            Button:
+                text: "Skip"
+                size_hint: None, None
+                size: dp(64), dp(30)
+                background_normal: ""
+                background_color: 0, 0, 0, 0
+                color: 1, 1, 1, .5
+                font_size: "13sp"
+                on_release: root.finish()
+        Carousel:
+            id: carousel
+            on_index: root.index = self.index
+        Label:
+            text: root.dots_text
+            font_size: "20sp"
+            markup: True
+            size_hint_y: None
+            height: dp(24)
+        PrimaryButton:
+            size_hint_y: None
+            height: dp(52)
+            text: "Get started" if root.index >= root.count - 1 else "Next"
+            on_release: root.advance()
+
 <TabButton>:
     orientation: "vertical"
     padding: [0, dp(6), 0, dp(4)]
@@ -1601,6 +1692,11 @@ KV = """
                                 text_size: self.width, None
                                 height: self.texture_size[1]
                                 halign: "left"
+                        GhostButton:
+                            text: "How to use the app"
+                            size_hint_y: None
+                            height: dp(44)
+                            on_release: root.show_tutorial()
                         Label:
                             text: "Media Downloader " + root.app_version
                             font_size: "12sp"
@@ -1745,6 +1841,71 @@ class ConfirmPopup(ModalView):
         self.dismiss()
         if self._on_ok:
             self._on_ok()
+
+
+class TutorialPopup(ModalView):
+    index = NumericProperty(0)
+    count = NumericProperty(0)
+    dots_text = StringProperty("")
+
+    SLIDES = [
+        ("Welcome to Media Downloader",
+         "Paste a link from X, TikTok, Snapchat, Instagram, Threads, Facebook, "
+         "YouTube or almost any site, then tap Download. That's the whole idea."),
+        ("Everything in four tabs",
+         "Download, Favorites, Files and Settings sit along the bottom. Download "
+         "is where you paste links; Files is where your saved media — and WhatsApp "
+         "statuses — live."),
+        ("Favorites that check themselves",
+         "Save the accounts you follow. The app can watch them and grab new posts "
+         "for you automatically. Search them and sort them into groups."),
+        ("Sign in for more",
+         "In Settings you can sign into Instagram, X, TikTok, Facebook or Snapchat "
+         "to download higher-quality media and the posts only your account can see."),
+        ("Sync across your devices",
+         "Log into a sync account in Settings and your favorites, logins and "
+         "download history follow you to your other phones — kept in step "
+         "automatically once a day."),
+        ("The floating button",
+         "Turn on the floating bubble to download a link you've copied from "
+         "anywhere, without opening the app first. You're all set — enjoy!"),
+    ]
+
+    def __init__(self, on_done=None, **kw):
+        self._on_done = on_done
+        super().__init__(**kw)
+        from kivy.factory import Factory
+        for i, (title, body) in enumerate(self.SLIDES):
+            slide = Factory.TutorialSlide()
+            slide.icon = str(i + 1)          # numbered step: always renders cleanly
+            slide.title = title
+            slide.body = body
+            self.ids.carousel.add_widget(slide)
+        self.count = len(self.SLIDES)
+        self._update_dots()
+
+    def on_index(self, *_):
+        self._update_dots()
+
+    def _update_dots(self):
+        dots = []
+        for i in range(self.count):
+            if i == self.index:
+                dots.append("[color=66d9ff]●[/color]")
+            else:
+                dots.append("[color=4d5570]●[/color]")
+        self.dots_text = " ".join(dots)
+
+    def advance(self):
+        if self.index >= self.count - 1:
+            self.finish()
+        else:
+            self.ids.carousel.load_next(mode="next")
+
+    def finish(self):
+        self.dismiss()
+        if self._on_done:
+            self._on_done()
 
 
 def _mix(c, t, amount):
@@ -2448,6 +2609,16 @@ class Root(FloatLayout):
         """The one global download archive, shared by all folders and synced."""
         import dlarchive
         return dlarchive.path(App.get_running_app().user_data_dir)
+
+    def show_tutorial(self, *_):
+        TutorialPopup().open()
+
+    def first_run_tutorial(self):
+        """Show the walkthrough once, the first time the app is opened."""
+        if self.store.exists("tutorial_seen"):
+            return
+        self.store.put("tutorial_seen", done=True)   # set now so it shows once
+        self.show_tutorial()
 
     def migrate_archive_once(self):
         """Fold old per-folder archives into the global one, once, in the
@@ -3793,6 +3964,7 @@ class XMediaApp(App):
                                         self.root_widget.arm_float()), 3)
         Clock.schedule_once(lambda *_: self.root_widget.cloud_restore(), 1)
         Clock.schedule_once(lambda *_: self.root_widget.migrate_archive_once(), 4)
+        Clock.schedule_once(lambda *_: self.root_widget.first_run_tutorial(), 1.5)
         Window.bind(on_keyboard=self._on_key)
         if platform == "android":
             try:
