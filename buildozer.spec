@@ -5,10 +5,10 @@ package.domain = org.personal
 source.dir = .
 source.include_exts = py,png,jpg,kv,json
 source.exclude_dirs = recipes,bin,out,.github
-version = 7.14
+version = 7.15
 # Explicit version code, always higher than the previous build, so updates
 # install cleanly (auto-derived codes get ambiguous once the minor is 2 digits).
-android.numeric_version = 1024714
+android.numeric_version = 1024715
 requirements = python3,kivy,android,pyjnius,sqlite3,openssl,requests,urllib3,certifi,charset-normalizer,idna,gallery-dl,yt-dlp,av,ffpyplayer_codecs
 orientation = portrait
 services = Downloader:service.py:foreground,Downloader2:service.py:foreground,Downloader3:service.py:foreground,Autocheck:service.py:foreground,Float:floatie.py:foreground

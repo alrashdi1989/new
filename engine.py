@@ -182,6 +182,8 @@ class Job:
         self.new_files = []
         self.total = 0
         self.last_error = ""
+        self.download_fails = 0      # individual media that 404'd (gone from the server)
+        self.hard_errors = 0         # real failures (extraction, login, network…)
         self.posts = set()
         self.story_items = []        # story files of this run, in order (new + already saved)
         self.skipped = 0             # files already downloaded before
@@ -438,6 +440,13 @@ class Job:
             self.log(line)
             if "][error]" in line or "][warning]" in line:
                 self.last_error = line.split("] ", 1)[-1].strip()
+            if "][error]" in line:
+                # a single media that won't download (usually removed from the
+                # server) vs. a real failure of the whole account
+                if "failed to download" in line.lower() or "[download][error]" in line:
+                    self.download_fails += 1
+                else:
+                    self.hard_errors += 1
             low = line.lower()
             if self.spec["site"] == "x" and (
                     "401" in low or "login" in low or "authenticat" in low):
@@ -550,6 +559,17 @@ class Job:
         if (result == "done" and self.spec["site"] == "facebook" and self.count == 0
                 and "photo list" in self.last_error.lower()):
             result = "error"
+
+        # A few individual media that 404'd (removed from the server) shouldn't
+        # flag the whole account — the list loaded and everything still there was
+        # handled. Only downgrade when nothing else actually went wrong.
+        if (result == "error" and self.hard_errors == 0 and self.download_fails > 0):
+            n = self.download_fails
+            self.log(f"Note: {n} old item{'s' if n != 1 else ''} no longer "
+                     f"available on {SITE.get(self.spec['site'], 'the site')} "
+                     f"(skipped). Everything else is up to date.")
+            self.last_error = ""
+            result = "done"
 
         if self.skipped:
             self.log(f"Already had {self.skipped} files, skipped them.")
