@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.13"
+APP_VERSION = "7.14"
 
 
 
@@ -2503,6 +2503,10 @@ class Root(FloatLayout):
             lines.append(f"Last check: {nice_time(last['time'])} · "
                          f"{new} new file{'s' if new != 1 else ''}"
                          + (" · some had problems" if last.get("result") == "error" else ""))
+            bad = list(dict.fromkeys(last.get("failed") or []))
+            if bad:
+                shown = ", ".join(bad[:6]) + (f" +{len(bad) - 6} more" if len(bad) > 6 else "")
+                lines.append("Couldn't check: " + shown)
         self.ids.auto_info.text = "\n".join(lines)
 
     # ---- floating button ----

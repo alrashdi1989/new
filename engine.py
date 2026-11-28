@@ -584,6 +584,33 @@ class Job:
         return result
 
 
+def job_label(spec):
+    """A readable name for a link that failed, for the 'problem with' message."""
+    user = (spec.get("user") or "").strip()
+    if user:
+        return user
+    lbl = os.path.basename((spec.get("out_label") or spec.get("out") or "").rstrip("/"))
+    return lbl.strip() or "a link"
+
+
+def _dedup(names):
+    out = []
+    for x in names:
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
+def names_line(names, lead="Problem with: ", limit=6):
+    names = _dedup(names)
+    if not names:
+        return ""
+    shown = ", ".join(names[:limit])
+    if len(names) > limit:
+        shown += f" +{len(names) - limit} more"
+    return lead + shown
+
+
 def run_queue(queue, scan=None, notify=None):
     """Download several links one after another.
 
@@ -601,10 +628,11 @@ def run_queue(queue, scan=None, notify=None):
     if n == 1:
         job = Job(jobs[0], scan=scan, notify=notify, pos=pos_of(1, jobs[0]), first=True)
         r = job.run()
-        job.save(problems=1 if r == "error" else 0, links=1, done_links=1)
+        failed = [job_label(jobs[0])] if r == "error" else []
+        job.save(problems=1 if r == "error" else 0, links=1, done_links=1, failed=failed)
         return r
 
-    results, total_new, last = [], 0, None
+    results, total_new, last, failed = [], 0, None, []
     for i, spec in enumerate(jobs, 1):
         last = Job(spec, scan=scan, notify=notify, pos=pos_of(i, spec), first=(i == 1))
         if last.cancelled():
@@ -612,6 +640,8 @@ def run_queue(queue, scan=None, notify=None):
         last.state.update(links=n, done_links=i - 1, new_before=total_new)
         r = last.run(final=False)
         results.append(r)
+        if r == "error":
+            failed.append(job_label(spec))
         total_new += last.count
         if r == "cancelled":
             break
@@ -624,9 +654,13 @@ def run_queue(queue, scan=None, notify=None):
     else:
         state, head = "done", f"Finished all {n} links."
     status = f"{head} {total_new} new files"
+    nl = names_line(failed)
+    if nl:
+        status += ".  " + nl
     if not jobs[0].get("tag"):            # with several workers the app shows the total
         last.log("\n" + status)
     last.save(state=state, count=total_new, total=0, seen=0, status=status,
-              problems=problems, links=n, done_links=len(results), new_before=0)
+              problems=problems, links=n, done_links=len(results), new_before=0,
+              failed=failed)
     last.notify(status, done=True)
     return state

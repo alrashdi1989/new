@@ -97,6 +97,7 @@ def overall_summary(text):
         return text
     links = new = problems = 0
     stopped = False
+    failed = []
     for d in dirs:
         st = engine.read_status(d) or {}
         if d != spec["status_dir"] and st.get("state") == "running" \
@@ -105,11 +106,16 @@ def overall_summary(text):
         links += st.get("links") or 1
         new += st.get("count") or 0
         problems += st.get("problems", 1 if st.get("state") == "error" else 0) or 0
+        failed += st.get("failed") or []
         stopped = stopped or st.get("state") == "cancelled"
     if stopped:
         return f"Stopped. {new} new files"
     if problems:
-        return f"Finished {links} links, {problems} with problems. {new} new files"
+        line = f"Finished {links} links, {problems} with problems. {new} new files"
+        nl = engine.names_line(failed)
+        if nl:
+            line += "\n" + nl
+        return line
     return f"Finished all {links} links. {new} new files"
 
 
@@ -180,14 +186,16 @@ def run_auto():
     result = engine.run_queue(queue, scan=scan, notify=auto_notify)
     st = engine.read_status(queue["status_dir"]) or {}
     new = st.get("count") or 0
+    failed = st.get("failed") or []
     data = autocheck.load(path)
-    data["last"] = {"time": time.time(), "new": new, "result": result}
+    data["last"] = {"time": time.time(), "new": new, "result": result, "failed": failed}
     autocheck.save(path, data)
     if new or result == "error":                   # stay quiet when nothing changed
         text = (f"{new} new file{'s' if new != 1 else ''} from your favorites"
-                if new else "Couldn't check some favorites")
+                if new else "Checked your favorites")
         if result == "error":
-            text += " (some had problems; open the app for details)"
+            nl = engine.names_line(failed, lead="Couldn't check: ")
+            text += ("\n" + nl) if nl else " (some had problems; open the app for details)"
         notify(text, done=True)
 
 
