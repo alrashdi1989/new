@@ -45,7 +45,7 @@ from links import (RESERVED, FB_RESERVED, parse_username, IG_RESERVED, IMAGE_EXT
                    is_ig_profile, resolve_link, parse_links, build_args, output_dir,
                    pretty_path)
 
-APP_VERSION = "7.15"
+APP_VERSION = "7.16"
 
 
 
@@ -73,6 +73,7 @@ def download_root():
 
 # ---------- storage permission + folder picker (Android) ----------
 PICK_FOLDER_REQ = 4242
+PICK_VIDEO_REQ = 4243
 
 
 def sdk_int():
@@ -145,6 +146,83 @@ def pick_folder(callback):
     Intent = autoclass("android.content.Intent")
     act = autoclass("org.kivy.android.PythonActivity").mActivity
     act.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_FOLDER_REQ)
+
+
+def pick_video(callback):
+    """Open the system picker for a video; callback(uri or None) on the Kivy thread."""
+    if platform != "android":
+        callback(None)
+        return
+    from android import activity as android_activity  # type: ignore
+    from jnius import autoclass  # type: ignore
+
+    def on_result(request_code, result_code, data):
+        if request_code != PICK_VIDEO_REQ:
+            return
+        android_activity.unbind(on_activity_result=on_result)
+        uri = None
+        try:
+            if result_code == -1 and data is not None:
+                uri = data.getData()
+        except Exception:
+            uri = None
+        Clock.schedule_once(lambda *_: callback(uri))
+
+    android_activity.bind(on_activity_result=on_result)
+    Intent = autoclass("android.content.Intent")
+    intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+    intent.addCategory(Intent.CATEGORY_OPENABLE)
+    intent.setType("video/*")
+    act = autoclass("org.kivy.android.PythonActivity").mActivity
+    act.startActivityForResult(intent, PICK_VIDEO_REQ)
+
+
+def content_display_name(uri):
+    try:
+        from jnius import autoclass  # type: ignore
+        act = autoclass("org.kivy.android.PythonActivity").mActivity
+        OpenableColumns = autoclass("android.provider.OpenableColumns")
+        cursor = act.getContentResolver().query(uri, None, None, None, None)
+        name = None
+        if cursor is not None:
+            idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if cursor.moveToFirst() and idx >= 0:
+                name = cursor.getString(idx)
+            cursor.close()
+        return name
+    except Exception:
+        return None
+
+
+def copy_content_uri(uri, dst):
+    """Copy a picked content:// file to a real path so PyAV can open it."""
+    from jnius import autoclass  # type: ignore
+    act = autoclass("org.kivy.android.PythonActivity").mActivity
+    ins = act.getContentResolver().openInputStream(uri)
+    fos = autoclass("java.io.FileOutputStream")(dst)
+    try:
+        try:
+            autoclass("android.os.FileUtils").copy(ins, fos)   # API 29+, all in Java
+        except Exception:
+            buf = bytearray(262144)
+            while True:
+                n = ins.read(buf)
+                if n == -1:
+                    break
+                fos.write(buf, 0, n)
+    finally:
+        fos.close()
+        ins.close()
+
+
+def unique_path(path):
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    i = 2
+    while os.path.exists(f"{base} ({i}){ext}"):
+        i += 1
+    return f"{base} ({i}){ext}"
 
 
 MEDIA_EXT = tuple("." + e for e in IMAGE_EXT + VIDEO_EXT)
@@ -868,6 +946,80 @@ KV = """
                 text: root.ok_text
                 on_release: root.confirm()
 
+<BusyPopup>:
+    background: ""
+    background_color: 0, 0, 0, 0
+    overlay_color: 0, 0, 0, .72
+    size_hint: .8, None
+    height: bcard.height
+    auto_dismiss: False
+    msg: "Working…"
+    GlassCard:
+        id: bcard
+        size_hint_y: None
+        height: dp(118)
+        canvas.before:
+            Color:
+                rgba: .07, .09, .18, .99
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(20)]
+        padding: dp(20)
+        Label:
+            text: root.msg
+            font_size: "15sp"
+            halign: "center"
+            valign: "middle"
+            text_size: self.size
+
+<YTFormatPopup>:
+    background: ""
+    background_color: 0, 0, 0, 0
+    overlay_color: 0, 0, 0, .78
+    size_hint: .88, None
+    height: ycard.height
+    auto_dismiss: True
+    GlassCard:
+        id: ycard
+        size_hint_y: None
+        height: dp(248)
+        canvas.before:
+            Color:
+                rgba: .07, .09, .18, .99
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(22)]
+        padding: dp(22)
+        spacing: dp(12)
+        Label:
+            text: "Download YouTube as"
+            bold: True
+            font_size: "19sp"
+            size_hint_y: None
+            height: dp(30)
+            halign: "left"
+            text_size: self.width, None
+        Label:
+            text: "Pick the format for the YouTube link(s) in this download."
+            font_size: "13sp"
+            color: 1, 1, 1, .6
+            size_hint_y: None
+            height: dp(36)
+            halign: "left"
+            text_size: self.width, None
+        PrimaryButton:
+            text: "Video (MP4)"
+            size_hint_y: None
+            height: dp(52)
+            on_release: root.pick(False)
+        GhostButton:
+            text: "Audio only (M4A)"
+            size_hint_y: None
+            height: dp(52)
+            on_release: root.pick(True)
+
 <TutorialPopup>:
     background: ""
     background_color: 0, 0, 0, 0
@@ -1332,6 +1484,13 @@ KV = """
                             opacity: 0 if root.files_account else 1
                             disabled: bool(root.files_account)
                             on_release: root.files_refresh()
+                    GhostButton:
+                        text: "Extract audio from a video"
+                        size_hint_y: None
+                        height: dp(44) if not root.files_account else 0
+                        opacity: 1 if not root.files_account else 0
+                        disabled: bool(root.files_account)
+                        on_release: root.pick_video_for_audio()
                     ScrollView:
                         id: files_scroll
                         do_scroll_x: False
@@ -1908,6 +2067,21 @@ class ConfirmPopup(ModalView):
         self.dismiss()
         if self._on_ok:
             self._on_ok()
+
+
+class BusyPopup(ModalView):
+    msg = StringProperty("Working…")
+
+
+class YTFormatPopup(ModalView):
+    def __init__(self, on_choose=None, default_audio=False, **kw):
+        self._on_choose = on_choose
+        super().__init__(**kw)
+
+    def pick(self, audio):
+        self.dismiss()
+        if self._on_choose:
+            self._on_choose(audio)
 
 
 class TutorialPopup(ModalView):
@@ -3339,6 +3513,52 @@ class Root(FloatLayout):
     # ---- Files tab (downloads browser) ----
     FILES_PAGE = 60
 
+    # ---- video → audio ----
+    def pick_video_for_audio(self):
+        if platform != "android":
+            self.toast("Extracting audio works in the phone app.")
+            return
+        pick_video(lambda uri: uri and self._convert_to_audio(uri))
+
+    def _convert_to_audio(self, uri):
+        import audioconv
+        name = content_display_name(uri) or "video.mp4"
+        pop = BusyPopup(msg="Extracting audio…\nThis can take a moment.")
+        pop.open()
+
+        def work():
+            err = None
+            dst = None
+            data_dir = App.get_running_app().user_data_dir
+            tmpdir = os.path.join(data_dir, "convert")
+            src = os.path.join(tmpdir, "src_" + re.sub(r"[^\w.\-]", "_", name)[:80])
+            try:
+                os.makedirs(tmpdir, exist_ok=True)
+                copy_content_uri(uri, src)
+                audio_dir = os.path.join(self.save_dir, "Audio")
+                os.makedirs(audio_dir, exist_ok=True)
+                dst = unique_path(os.path.join(audio_dir, audioconv.out_name(name)))
+                audioconv.extract_audio(src, dst)
+                media_scan([dst])
+            except Exception as e:
+                err = str(e)
+            finally:
+                try:
+                    os.remove(src)
+                except OSError:
+                    pass
+
+            def done(*_):
+                pop.dismiss()
+                if err:
+                    self.toast("Couldn't extract audio: " + err[:80])
+                else:
+                    self.toast("Saved " + os.path.basename(dst) + " to the Audio folder")
+                    if self.files_mode == "downloads" and not self.files_account:
+                        self.files_refresh()
+            Clock.schedule_once(done)
+        threading.Thread(target=work, daemon=True).start()
+
     def files_open(self):
         if self.files_account:
             return
@@ -3778,6 +3998,21 @@ class Root(FloatLayout):
         if not self.ensure_access():
             self.set_status("Allow file access, then tap Download again.")
             return
+        yt_jobs = [j for j in jobs if j.get("site") == "youtube"]
+        if yt_jobs:
+            default_audio = (self.store.get("ytfmt").get("audio", False)
+                             if self.store.exists("ytfmt") else False)
+
+            def choose(audio):
+                self.store.put("ytfmt", audio=audio)
+                for j in yt_jobs:
+                    j["yt"]["audio_only"] = audio
+                self._launch(jobs, links, bad)
+            YTFormatPopup(on_choose=choose, default_audio=default_audio).open()
+            return
+        self._launch(jobs, links, bad)
+
+    def _launch(self, jobs, links, bad):
         for j in jobs:
             os.makedirs(j["out"], exist_ok=True)
         site, user = links[0][0], links[0][1]
